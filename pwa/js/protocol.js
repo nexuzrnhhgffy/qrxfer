@@ -387,10 +387,19 @@
     return new TextDecoder("utf-8").decode(bytes);
   }
 
-  function buildSource(filename, data, compressFn) {
-    const base = filename.split(/[\\/]/).pop() || "file.bin";
+  function clipName(filename) {
+    let base = String(filename || "file.bin").split(/[\\/]/).pop() || "file.bin";
+    if (/^content:/i.test(String(filename || "")) || /^content:/i.test(base)) {
+      const ext = (base.match(/(\.[A-Za-z0-9]{1,8})$/) || [""])[0];
+      base = "file" + ext;
+    }
     let nameBytes = utf8Encode(base);
     if (nameBytes.length > MAX_NAME_BYTES) nameBytes = nameBytes.subarray(0, MAX_NAME_BYTES);
+    return nameBytes;
+  }
+
+  function buildSource(filename, data, compressFn) {
+    const nameBytes = clipName(filename);
     const compressed = compressFn(data);
     const header = new Uint8Array(2 + nameBytes.length + 8 + compressed.length);
     header[0] = PROTOCOL_VERSION;
@@ -403,17 +412,73 @@
     return header;
   }
 
+  function buildChunkedSource(filename, origData, chunks) {
+    const nameBytes = clipName(filename);
+    let extra = 0;
+    for (let i = 0; i < chunks.length; i++) extra += 9 + chunks[i].payload.length;
+    const head = 2 + nameBytes.length + 10;
+    const out = new Uint8Array(head + extra);
+    out[0] = 3;
+    out[1] = nameBytes.length;
+    out.set(nameBytes, 2);
+    const view = new DataView(out.buffer);
+    const p = 2 + nameBytes.length;
+    view.setUint32(p, origData.length, true);
+    view.setUint32(p + 4, crc32(origData), true);
+    view.setUint16(p + 8, chunks.length, true);
+    let off = p + 10;
+    for (let i = 0; i < chunks.length; i++) {
+      const ch = chunks[i];
+      out[off] = ch.flag;
+      view.setUint32(off + 1, ch.rawLen, true);
+      view.setUint32(off + 5, ch.payload.length, true);
+      out.set(ch.payload, off + 9);
+      off += 9 + ch.payload.length;
+    }
+    return out;
+  }
+
   async function parseSource(blob, inflateFn) {
     if (blob.length < 10) throw new Error("Source blob too small");
     const version = blob[0];
-    if (version !== 1 && version !== 2) throw new Error("Unsupported source version");
+    if (version !== 1 && version !== 2 && version !== 3) throw new Error("Unsupported source version");
     const nameLen = blob[1];
     const name = utf8Decode(blob.subarray(2, 2 + nameLen));
     const view = new DataView(blob.buffer, blob.byteOffset, blob.byteLength);
     const origSize = view.getUint32(2 + nameLen, true);
     const origCrc = view.getUint32(2 + nameLen + 4, true);
-    const compressed = blob.subarray(2 + nameLen + 8);
-    const raw = await inflateFn(compressed, version);
+    let raw;
+    if (version === 3) {
+      const nchunks = view.getUint16(2 + nameLen + 8, true);
+      let off = 2 + nameLen + 10;
+      const parts = [];
+      let total = 0;
+      for (let c = 0; c < nchunks; c++) {
+        if (off + 9 > blob.length) throw new Error("Truncated chunk header");
+        const flag = blob[off];
+        const rawLen = view.getUint32(off + 1, true);
+        const payLen = view.getUint32(off + 5, true);
+        off += 9;
+        if (off + payLen > blob.length) throw new Error("Truncated chunk payload");
+        const payload = blob.subarray(off, off + payLen);
+        off += payLen;
+        let piece;
+        if (flag === 2) piece = await inflateFn(payload, 2);
+        else piece = payload;
+        if (piece.length !== rawLen) throw new Error("Chunk size mismatch");
+        parts.push(piece);
+        total += piece.length;
+      }
+      raw = new Uint8Array(total);
+      let n = 0;
+      for (let i = 0; i < parts.length; i++) {
+        raw.set(parts[i], n);
+        n += parts[i].length;
+      }
+    } else {
+      const compressed = blob.subarray(2 + nameLen + 8);
+      raw = await inflateFn(compressed, version);
+    }
     if (raw.length !== origSize) throw new Error("Decompressed size mismatch");
     if (crc32(raw) !== origCrc) throw new Error("Original file CRC mismatch");
     return { name: name, data: raw };
@@ -462,8 +527,14 @@
     return null;
   }
 
+  function encodeMeet(kind, code) {
+    const prefix = kind === "G" ? "QXF2G" : kind === "A" ? "QXF2A" : "QXF2H";
+    return prefix + JSON.stringify({ j: String(code || "").slice(0, 8) });
+  }
+
   function TransferEncoder(filename, data, blockSize, sessionId, compressFn) {
-    this.source = buildSource(filename, data, compressFn);
+    if (compressFn instanceof Uint8Array) this.source = compressFn;
+    else this.source = buildSource(filename, data, compressFn);
     this.lt = new LTEncoder(this.source, blockSize, sessionId);
     this.sessionId = this.lt.sessionId;
     this.blockSize = blockSize;
@@ -515,7 +586,10 @@
     encodeHello: encodeHello,
     encodeAck: encodeAck,
     encodeGo: encodeGo,
+    encodeMeet: encodeMeet,
     parseControl: parseControl,
+    buildChunkedSource: buildChunkedSource,
+    clipName: clipName,
     PROTOCOL_VERSION: PROTOCOL_VERSION,
     MAX_FILE_BYTES: MAX_FILE_BYTES,
   };

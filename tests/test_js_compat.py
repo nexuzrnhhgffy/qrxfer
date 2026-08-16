@@ -49,6 +49,51 @@ console.log(JSON.stringify({neigh, pkt, mixes, crc: Q.crc32(payload), agreed, bi
         self.assertEqual(js["maxFile"], 1024 * 1024 * 1024)
 
 
+class MobileControlTests(unittest.TestCase):
+    def test_huge_filename_control_still_fits(self):
+        codec = ROOT / "pwa" / "js" / "codec.js"
+        script = r"""
+global.Qxfer = require(process.argv[1]);
+global.self = global;
+const B = require(process.argv[2]);
+const Q = global.Qxfer;
+const huge = Q.encodeHello({
+  j: "ABC234",
+  n: "content://media/external/file/" + "x".repeat(400) + ".jpg",
+  o: 999999,
+  t: 888888,
+  k: 12345
+});
+const grid = B.encodeControl(huge, 32);
+const got = B.decodeGrid(grid);
+const meet = Q.encodeMeet("H", "ABC234");
+const g2 = B.encodeControl(meet, 32);
+const d2 = B.decodeGrid(g2);
+const raw = new Uint8Array([1,2,3,4,5,6,7,8]);
+const src = Q.buildChunkedSource("t.bin", raw, [{flag: 0, rawLen: raw.length, payload: raw}]);
+console.log(JSON.stringify({
+  meet: meet,
+  meetParsed: Q.parseControl(d2.data ? new TextDecoder().decode(d2.data) : ""),
+  recoveredJ: Q.parseControl(new TextDecoder().decode(got.data)).j,
+  src: Array.from(src)
+}));
+"""
+        proc = subprocess.run(
+            ["node", "-e", script, str(JS), str(codec)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        js = json.loads(proc.stdout)
+        self.assertEqual(js["recoveredJ"], "ABC234")
+        self.assertEqual(js["meetParsed"]["j"], "ABC234")
+        from qrxfer.protocol import parse_source
+
+        name, data = parse_source(bytes(js["src"]))
+        self.assertEqual(name, "t.bin")
+        self.assertEqual(data, bytes([1, 2, 3, 4, 5, 6, 7, 8]))
+
+
 class DisplaySizeTests(unittest.TestCase):
     def test_fits_phone_and_desktop_without_filling_the_monitor(self):
         codec = ROOT / "pwa" / "js" / "codec.js"

@@ -91,6 +91,11 @@ def decompress_payload(compressed: bytes, version: int) -> bytes:
     return zlib.decompress(compressed)
 
 
+FLAG_RAW = 0
+FLAG_LZMA = 2
+SOURCE_CHUNK = 256 * 1024
+
+
 def build_source(filename: str, data: bytes) -> bytes:
     name_b = os.path.basename(filename).encode("utf-8")[:MAX_NAME_BYTES]
     header = struct.pack("<BB", PROTOCOL_VERSION, len(name_b)) + name_b
@@ -98,19 +103,67 @@ def build_source(filename: str, data: bytes) -> bytes:
     return header + compress_payload(data)
 
 
+def build_source_chunked(filename: str, data: bytes, chunk_size: int = SOURCE_CHUNK) -> bytes:
+    name_b = os.path.basename(filename).encode("utf-8")[:MAX_NAME_BYTES]
+    parts = []
+    for i in range(0, max(1, len(data)), chunk_size):
+        piece = data[i : i + chunk_size] if data else b""
+        if not piece and parts:
+            break
+        try:
+            comp = compress_payload(piece) if piece else b""
+            if piece and len(comp) < len(piece):
+                parts.append((FLAG_LZMA, len(piece), comp))
+            else:
+                parts.append((FLAG_RAW, len(piece), piece))
+        except Exception:
+            parts.append((FLAG_RAW, len(piece), piece))
+    if not parts:
+        parts.append((FLAG_RAW, 0, b""))
+    out = struct.pack("<BB", 3, len(name_b)) + name_b
+    out += struct.pack("<IIH", len(data), crc32(data), len(parts))
+    for flag, raw_len, payload in parts:
+        out += struct.pack("<BII", flag, raw_len, len(payload)) + payload
+    return out
+
+
 def parse_source(blob: bytes) -> Tuple[str, bytes]:
     if len(blob) < 10:
         raise ValueError("Source blob too small")
     version = blob[0]
-    if version not in (1, 2):
+    if version not in (1, 2, 3):
         raise ValueError(f"Unsupported source version: {version}")
     name_len = blob[1]
     if len(blob) < 2 + name_len + 8:
         raise ValueError("Truncated source header")
-    name = blob[2 : 2 + name_len].decode("utf-8")
+    name = blob[2 : 2 + name_len].decode("utf-8", errors="replace")
     orig_size, orig_crc = struct.unpack_from("<II", blob, 2 + name_len)
-    compressed = blob[2 + name_len + 8 :]
-    raw = decompress_payload(compressed, version)
+    if version == 3:
+        if len(blob) < 2 + name_len + 10:
+            raise ValueError("Truncated chunked header")
+        nchunks = struct.unpack_from("<H", blob, 2 + name_len + 8)[0]
+        off = 2 + name_len + 10
+        pieces = []
+        for _ in range(nchunks):
+            if off + 9 > len(blob):
+                raise ValueError("Truncated chunk header")
+            flag, raw_len, pay_len = struct.unpack_from("<BII", blob, off)
+            off += 9
+            if off + pay_len > len(blob):
+                raise ValueError("Truncated chunk payload")
+            payload = blob[off : off + pay_len]
+            off += pay_len
+            if flag == FLAG_LZMA:
+                piece = decompress_payload(payload, 2)
+            else:
+                piece = payload
+            if len(piece) != raw_len:
+                raise ValueError("Chunk size mismatch")
+            pieces.append(piece)
+        raw = b"".join(pieces)
+    else:
+        compressed = blob[2 + name_len + 8 :]
+        raw = decompress_payload(compressed, version)
     if len(raw) != orig_size:
         raise ValueError("Decompressed size mismatch")
     if crc32(raw) != orig_crc:
@@ -136,6 +189,11 @@ def agree_params(suggested_grid: int, suggested_fps: int, cam_fps: float, cam_wi
 
 def encode_hello(info: dict) -> str:
     return "QXF2H" + json.dumps(info, separators=(",", ":"), ensure_ascii=False)
+
+
+def encode_meet(kind: str, code: str) -> str:
+    prefix = {"G": "QXF2G", "A": "QXF2A"}.get(kind, "QXF2H")
+    return prefix + json.dumps({"j": str(code or "")[:8]}, separators=(",", ":"))
 
 
 def encode_ack(info: dict) -> str:

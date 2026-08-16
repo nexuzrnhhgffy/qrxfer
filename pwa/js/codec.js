@@ -117,9 +117,16 @@
 
   function encodeControl(text, n) {
     n = n || HANDSHAKE_GRID;
-    const packed = wrapPayload(TYPE_CONTROL, new TextEncoder().encode(text));
-    if (packed.length > Math.floor(dataCellCount(n) / 8)) throw new Error("control too large");
-    return writeBits(n, packed);
+    const max = Math.floor(dataCellCount(n) / 8) - 7;
+    let bytes = new TextEncoder().encode(text || "");
+    if (bytes.length > max) {
+      const match = String(text).match(/"j"\s*:\s*"([A-Za-z0-9]{1,8})"/);
+      bytes = new TextEncoder().encode("QXF2H" + JSON.stringify({ j: match ? match[1] : "" }));
+    }
+    if (bytes.length > max) {
+      bytes = new TextEncoder().encode("QXF2H{\"j\":\"\"}");
+    }
+    return writeBits(n, wrapPayload(TYPE_CONTROL, bytes));
   }
 
   function encodeData(packet, n) {

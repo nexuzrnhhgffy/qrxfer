@@ -17,13 +17,14 @@ let lastPaint = null;
 
 const LZMA_API = window.LZMA || window.LZMA_WORKER;
 
-function lzmaCompress(bytes) {
+function lzmaCompress(bytes, preset) {
+  preset = preset == null ? 1 : preset;
   return new Promise((resolve, reject) => {
     if (!LZMA_API || !LZMA_API.compress) {
       reject(new Error("LZMA در دسترس نیست"));
       return;
     }
-    LZMA_API.compress(bytes, 9, (res, err) => {
+    LZMA_API.compress(bytes, preset, (res, err) => {
       if (err) reject(err);
       else resolve(res instanceof Uint8Array ? res : Uint8Array.from(res));
     });
@@ -38,6 +39,52 @@ function lzmaDecompress(bytes) {
       else resolve(res instanceof Uint8Array ? res : Uint8Array.from(res));
     });
   });
+}
+
+function safeName(name) {
+  const bytes = Qxfer.clipName(name);
+  return new TextDecoder("utf-8").decode(bytes);
+}
+
+async function readFileChunked(file, onProgress) {
+  const size = file.size;
+  const out = new Uint8Array(size);
+  const chunk = 512 * 1024;
+  let offset = 0;
+  while (offset < size) {
+    const end = Math.min(offset + chunk, size);
+    const buf = await file.slice(offset, end).arrayBuffer();
+    out.set(new Uint8Array(buf), offset);
+    offset = end;
+    if (onProgress) onProgress(offset, size);
+  }
+  return out;
+}
+
+async function buildMobileSource(name, data, onProgress) {
+  const SIZE = 256 * 1024;
+  const chunks = [];
+  if (data.length === 0) {
+    chunks.push({ flag: 0, rawLen: 0, payload: new Uint8Array(0) });
+  }
+  for (let i = 0; i < data.length; i += SIZE) {
+    const part = data.subarray(i, Math.min(i + SIZE, data.length));
+    let flag = 0;
+    let payload = part;
+    try {
+      const comp = await lzmaCompress(part, 1);
+      if (comp && comp.length && comp.length < part.length) {
+        flag = 2;
+        payload = comp;
+      }
+    } catch (e) {
+      flag = 0;
+      payload = part;
+    }
+    chunks.push({ flag: flag, rawLen: part.length, payload: payload });
+    if (onProgress) onProgress(Math.min(i + SIZE, data.length), data.length);
+  }
+  return Qxfer.buildChunkedSource(name, data, chunks);
 }
 
 function inflateSource(compressed, version) {
@@ -220,57 +267,49 @@ function drawData(packet, gridN) {
   Beacon.drawGrid(canvas, Beacon.encodeData(packet, gridN));
 }
 
-function helloPayload(sess, extra) {
-  return Object.assign({
-    j: sess.code,
-    s: sess.optical,
-    t: sess.compressed,
-    o: sess.orig,
-    n: sess.name,
-    v: sess.grid || sess.suggest_grid,
-    g: sess.grid || sess.suggest_grid,
-    f: sess.fps || sess.suggest_fps,
-    k: sess.k || 0,
-  }, extra || {});
-}
-
 async function startSend(file) {
   running = true;
   showStage("full");
-  hud("در حال بیشترین فشرده‌سازی بدون‌اتلاف…");
-  const data = new Uint8Array(await file.arrayBuffer());
-  const compressed = await lzmaCompress(data);
+  const name = safeName(file.name);
+  hud("خواندن فایل…");
+  const data = await readFileChunked(file, (done, total) => {
+    hud("خواندن فایل " + Math.round((done / Math.max(1, total)) * 100) + "٪");
+  });
+  hud("فشرده‌سازی تکه‌تکه…");
+  const source = await buildMobileSource(name, data, (done, total) => {
+    hud("رمزنگاری " + Math.round((done / Math.max(1, total)) * 100) + "٪");
+  });
   const optical = (Math.random() * 0xffffffff) >>> 0 || 1;
-  const ratio = ((1 - compressed.length / Math.max(1, data.length)) * 100).toFixed(0);
+  const ratio = ((1 - Math.min(source.length, data.length) / Math.max(1, data.length)) * 100).toFixed(0);
   let sess = await api("/api/sessions", {
-    name: file.name,
+    name: name,
     orig: data.length,
-    compressed: compressed.length,
+    compressed: source.length,
     grid: SUGGESTED_GRID,
     fps: SUGGESTED_FPS,
     optical: optical,
   });
   activeCode = sess.code;
   setMeetCode(sess.code);
-  hud(`فشرده شد ${ratio}٪ — کد را به گیرنده بده و صبر کن`);
-  drawControl(Qxfer.encodeHello(helloPayload(sess)), Beacon.HANDSHAKE_GRID);
+  hud((ratio > 0 ? ("فشرده شد " + ratio + "٪ — ") : "") + "کد را به گیرنده بده و صبر کن");
+  drawControl(Qxfer.encodeMeet("H", sess.code), Beacon.HANDSHAKE_GRID);
 
   sess = await waitSession(sess.code, (s) => s.status === "joined" || s.status === "sending", 180000);
   if (!running) return;
   const grid = sess.grid || SUGGESTED_GRID;
   const fps = sess.fps || SUGGESTED_FPS;
   const blockSize = Beacon.blockSizeForGrid(grid);
-  encoder = new Qxfer.TransferEncoder(file.name, data, blockSize, optical, () => compressed);
+  encoder = new Qxfer.TransferEncoder(name, data, blockSize, optical, source);
   sess = await api("/api/sessions/" + sess.code + "/offer", { k: encoder.k, optical: optical });
   hud("گیرنده وصل شد — منتظر «شروع کن»");
-  drawControl(Qxfer.encodeHello(helloPayload(sess)), Beacon.HANDSHAKE_GRID);
+  drawControl(Qxfer.encodeMeet("H", sess.code), Beacon.HANDSHAKE_GRID);
 
   sess = await waitSession(sess.code, (s) => s.status === "sending" || s.status === "done", 180000);
   if (!running) return;
   if (sess.status === "done") return;
   setMeetCode("");
   hud("هماهنگ شد — شروع ارسال");
-  drawControl(Qxfer.encodeGo(helloPayload(sess, { type: "G" })), Beacon.HANDSHAKE_GRID);
+  drawControl(Qxfer.encodeMeet("G", sess.code), Beacon.HANDSHAKE_GRID);
   await sleep(900);
   if (!running) return;
   for (let n = 3; n >= 1; n--) {

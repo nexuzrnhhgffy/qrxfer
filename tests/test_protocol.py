@@ -94,6 +94,24 @@ class FountainTests(unittest.TestCase):
         self.assertEqual(agree_params(40, 5, 30, 720), (32, 3))
         self.assertEqual(agree_params(40, 5, 60, 1920), (40, 5))
 
+    def test_chunked_source_roundtrip_and_tiny_meet(self):
+        from qrxfer.blockcode import decode_grid, encode_control
+        from qrxfer.protocol import build_source_chunked, encode_meet, parse_control, parse_source
+
+        payload = os.urandom(300000)
+        blob = build_source_chunked("photo.jpg", payload, chunk_size=64000)
+        name, data = parse_source(blob)
+        self.assertEqual(name, "photo.jpg")
+        self.assertEqual(data, payload)
+
+        meet = encode_meet("H", "ABC234")
+        self.assertLess(len(meet.encode("utf-8")), 40)
+        grid = encode_control(meet, 32)
+        got = decode_grid(grid)
+        self.assertIsNotNone(got)
+        parsed = parse_control(got[1].decode("utf-8"))
+        self.assertEqual(parsed["j"], "ABC234")
+
 
 class QrPipelineTests(unittest.TestCase):
     def test_qr_image_roundtrip(self):
