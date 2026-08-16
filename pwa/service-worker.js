@@ -1,28 +1,17 @@
-const CACHE_NAME = "qrxfer-v3";
-const urlsToCache = [
-    "/",
-    "/index.html",
-    "/styles.css",
-    "/js/app.js",
-    "/js/protocol.js",
-    "/js/lzma_worker.min.js",
-    "/manifest.json",
-];
-
-self.addEventListener("install", (event) => {
-    event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(urlsToCache)));
-});
-
-self.addEventListener("fetch", (event) => {
-    event.respondWith(
-        caches.match(event.request).then((response) => response || fetch(event.request))
-    );
-});
+// Replaces the old cache-first worker that pinned the CDN QR page.
+// Clears caches, unregisters, and reloads once so Flask HTML is used.
+self.addEventListener("install", () => self.skipWaiting());
 
 self.addEventListener("activate", (event) => {
-    event.waitUntil(
-        caches.keys().then((names) =>
-            Promise.all(names.filter((n) => n !== CACHE_NAME).map((n) => caches.delete(n)))
-        )
-    );
+  event.waitUntil(
+    (async () => {
+      const names = await caches.keys();
+      await Promise.all(names.map((name) => caches.delete(name)));
+      await self.registration.unregister();
+      const windows = await self.clients.matchAll({ type: "window" });
+      for (const client of windows) {
+        client.navigate(client.url);
+      }
+    })()
+  );
 });

@@ -1,4 +1,4 @@
-"""Turn a file into a looping QR video (or a live OpenCV preview)."""
+"""Turn a file into a looping beacon-grid video."""
 
 from __future__ import annotations
 
@@ -10,18 +10,14 @@ from typing import Optional
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from .constants import (
-    DEFAULT_OVERHEAD,
-    DEFAULT_PRESET,
-    LOCK_COLOR,
-    PRESETS,
-    block_size_for_version,
-)
+from .blockcode import block_size_for_grid, encode_data, render_grid
+from .constants import DEFAULT_OVERHEAD, DEFAULT_PRESET, LOCK_COLOR, PRESETS
 from .protocol import TransferEncoder
-from .qr_generator import QRCodeGenerator
 from .video_writer import VideoWriter
 
 logger = logging.getLogger(__name__)
+
+_GRID_FROM_QR = {12: 32, 15: 32, 18: 40, 22: 40, 25: 48}
 
 
 def _load_font(size: int):
@@ -57,18 +53,19 @@ class QRVideoGenerator:
         overhead=DEFAULT_OVERHEAD,
         repeats=2,
         num_processes=1,
+        grid=None,
     ):
         spec = dict(PRESETS.get(preset, PRESETS[DEFAULT_PRESET]))
-        self.qr_version = qr_version or spec["qr_version"]
+        self.grid = grid or spec.get("grid") or _GRID_FROM_QR.get(qr_version or spec.get("qr_version"), 32)
         self.fps = fps or spec["fps"]
-        self.ecc = spec["ecc"]
         self.qr_size = qr_size
         self.overhead = overhead
         self.repeats = max(1, repeats)
-        self.qr_generator = QRCodeGenerator(
-            version=self.qr_version, qr_size=qr_size, ecc=self.ecc
-        )
-        self.block_size = block_size_for_version(self.qr_version)
+        self.qr_version = qr_version or spec.get("qr_version")
+        self.block_size = block_size_for_grid(self.grid)
+
+    def _frame(self, packet: bytes) -> np.ndarray:
+        return render_grid(encode_data(packet, self.grid), size=self.qr_size)
 
     def generate(self, input_file, output_video, session_id: Optional[int] = None):
         if not os.path.exists(input_file):
@@ -81,16 +78,17 @@ class QRVideoGenerator:
         )
         n_unique = max(encoder.k + 8, int(encoder.k * self.overhead))
         logger.info(
-            "Encoding %s: orig=%s bytes, source=%s bytes, k=%s, packets=%s x%s",
+            "Encoding %s: orig=%s bytes, source=%s bytes, k=%s, grid=%s, packets=%s x%s",
             input_file,
             encoder.orig_size,
             encoder.total_len,
             encoder.k,
+            self.grid,
             n_unique,
             self.repeats,
         )
 
-        first = self.qr_generator.generate_qr_code(encoder.packet(0))
+        first = self._frame(encoder.packet(0))
         h, w = first.shape[:2]
         writer = VideoWriter(output_video, fps=self.fps, frame_size=(w, h))
         writer.open()
@@ -103,24 +101,20 @@ class QRVideoGenerator:
 
             for _rep in range(self.repeats):
                 for seq in range(n_unique):
-                    pkt = encoder.packet(seq)
-                    frame = self.qr_generator.generate_qr_code(pkt)
-                    writer.write_frame(frame)
+                    writer.write_frame(self._frame(encoder.packet(seq)))
                     if (seq + 1) % 25 == 0:
                         logger.info("Written packet %s/%s", seq + 1, n_unique)
         finally:
             writer.close()
-        duration = (ready_frames + n_unique * self.repeats) / self.fps
-        logger.info("Video duration ~%.1fs at %s fps", duration, self.fps)
         return {
             "k": encoder.k,
             "packets": n_unique * self.repeats,
             "session_id": session_id,
             "output": output_video,
+            "grid": self.grid,
         }
 
     def preview(self, input_file, session_id: Optional[int] = None):
-        """Loop QR frames in an OpenCV window until q is pressed."""
         import cv2
 
         with open(input_file, "rb") as f:
@@ -131,9 +125,9 @@ class QRVideoGenerator:
         )
         delay = max(1, int(1000 / self.fps))
         seq = 0
-        logger.info("Live preview k=%s. Point the receiver camera and press q to quit.", encoder.k)
+        logger.info("Live preview k=%s grid=%s. Press q to quit.", encoder.k, self.grid)
         while True:
-            frame = self.qr_generator.generate_qr_code(encoder.packet(seq))
+            frame = self._frame(encoder.packet(seq))
             bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
             cv2.imshow("Qxfer sender — q to quit", bgr)
             seq += 1

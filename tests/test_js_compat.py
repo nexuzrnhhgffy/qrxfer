@@ -23,7 +23,7 @@ for (let i = 0; i < 16; i++) payload[i] = i + 3;
 const pkt = Array.from(Q.encodePacket(7, 3, 4, 16, 50, payload));
 const mixes = [];
 for (let seq = 0; seq < 8; seq++) mixes.push(Q.mix32(session, seq));
-const agreed = Q.agreeParams(25, 8, 30, 720);
+const agreed = Q.agreeParams(40, 5, 30, 720);
 console.log(JSON.stringify({neigh, pkt, mixes, crc: Q.crc32(payload), agreed}));
 """
         proc = subprocess.run(
@@ -41,5 +41,5 @@ console.log(JSON.stringify({neigh, pkt, mixes, crc: Q.crc32(payload), agreed}));
         self.assertEqual(js["crc"], crc32(payload))
         for seq, value in enumerate(js["mixes"]):
             self.assertEqual(value, mix32(123456789, seq), f"mix seq={seq}")
-        self.assertEqual(js["agreed"]["qrVersion"], agree_params(25, 8, 30, 720)[0])
-        self.assertEqual(js["agreed"]["fps"], agree_params(25, 8, 30, 720)[1])
+        self.assertEqual(js["agreed"]["qrVersion"], agree_params(40, 5, 30, 720)[0])
+        self.assertEqual(js["agreed"]["fps"], agree_params(40, 5, 30, 720)[1])

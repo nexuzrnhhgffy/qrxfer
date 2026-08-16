@@ -22,19 +22,22 @@ QR_SLACK = 4
 PRESETS = {
     "reliable": {
         "qr_version": 12,
+        "grid": 32,
         "fps": 3,
         "ecc": "L",
         "label": "Reliable (phone / distance)",
     },
     "balanced": {
         "qr_version": 18,
-        "fps": 5,
+        "grid": 40,
+        "fps": 4,
         "ecc": "L",
         "label": "Balanced",
     },
     "fast": {
         "qr_version": 25,
-        "fps": 8,
+        "grid": 48,
+        "fps": 6,
         "ecc": "L",
         "label": "Fast (close, good light)",
     },

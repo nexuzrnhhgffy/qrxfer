@@ -1,4 +1,6 @@
-from qrxfer.server import main
+from qrxfer.server import create_app
+
+app = create_app()
 
 if __name__ == "__main__":
-    main()
+    app.run(host="127.0.0.1", port=8080, debug=False, threaded=True)

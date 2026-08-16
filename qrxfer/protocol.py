@@ -118,21 +118,20 @@ def parse_source(blob: bytes) -> Tuple[str, bytes]:
     return name, raw
 
 
-def agree_params(suggested_version: int, suggested_fps: int, cam_fps: float, cam_width: int) -> Tuple[int, int]:
-    """Pick a QR version and FPS both cameras can actually keep up with."""
-    if cam_width >= 1800:
-        max_ver = 22
-    elif cam_width >= 1280:
-        max_ver = 18
-    elif cam_width >= 900:
-        max_ver = 15
+def agree_params(suggested_grid: int, suggested_fps: int, cam_fps: float, cam_width: int) -> Tuple[int, int]:
+    """Pick a beacon-grid size and FPS both cameras can keep up with."""
+    if cam_width >= 1600:
+        max_g = 48
+    elif cam_width >= 1000:
+        max_g = 40
     else:
-        max_ver = 12
-    version = min(int(suggested_version), max_ver)
+        max_g = 32
+    allowed = [g for g in (24, 28, 32, 36, 40, 48) if g <= min(int(suggested_grid or 40), max_g)]
+    grid = allowed[-1] if allowed else 32
     cam = int(cam_fps or 30)
-    max_fps = max(2, min(8, cam // 6 or 2))
-    fps = max(2, min(int(suggested_fps), max_fps))
-    return version, fps
+    max_fps = max(2, min(6, cam // 8 or 2))
+    fps = max(2, min(int(suggested_fps or 4), max_fps))
+    return grid, fps
 
 
 def encode_hello(info: dict) -> str:

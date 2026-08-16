@@ -75,52 +75,40 @@ class FountainTests(unittest.TestCase):
         parsed = parse_control(hello)
         self.assertEqual(parsed["type"], "H")
         self.assertEqual(parsed["s"], 9)
-        self.assertEqual(agree_params(25, 8, 30, 720), (12, 5))
-        self.assertEqual(agree_params(18, 5, 60, 1920), (18, 5))
+        self.assertEqual(agree_params(40, 5, 30, 720), (32, 3))
+        self.assertEqual(agree_params(40, 5, 60, 1920), (40, 5))
 
 
 class QrPipelineTests(unittest.TestCase):
     def test_qr_image_roundtrip(self):
-        try:
-            import zxingcpp  # noqa: F401
-        except ImportError:
-            self.skipTest("zxing-cpp not installed")
-        from qrxfer.qr_generator import QRCodeGenerator
+        from qrxfer.blockcode import TYPE_DATA, block_size_for_grid, decode_image, encode_data, render_grid
 
-        payload = os.urandom(1200)
-        block = block_size_for_version(12)
+        payload = os.urandom(400)
+        block = block_size_for_grid(32)
         enc = TransferEncoder("rand.bin", payload, block, session_id=99)
-        gen = QRCodeGenerator(version=12, qr_size=480, ecc="L")
         dec = TransferDecoder()
         for seq in range(int(enc.k * 2) + 4):
-            import cv2
-
-            frame = gen.generate_qr_code(enc.packet(seq))
-            bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-            barcodes = zxingcpp.read_barcodes(frame)
-            self.assertTrue(barcodes, f"QR not decoded at seq={seq}")
-            raw = getattr(barcodes[0], "bytes", None) or bytes(barcodes[0].text, "latin1")
-            dec.ingest(bytes(raw))
+            frame = render_grid(encode_data(enc.packet(seq), 32), size=480)
+            got = decode_image(frame, grids=(32,))
+            self.assertIsNotNone(got, f"grid not decoded at seq={seq}")
+            self.assertEqual(got[0], TYPE_DATA)
+            dec.ingest(got[1])
         name, data = dec.result()
         self.assertEqual(name, "rand.bin")
         self.assertEqual(data, payload)
 
     def test_video_roundtrip(self):
-        try:
-            import zxingcpp  # noqa: F401
-        except ImportError:
-            self.skipTest("zxing-cpp not installed")
         from qrxfer.decoder import VideoDecoder
         from qrxfer.generator import QRVideoGenerator
 
-        payload = b"video-pipe-" + os.urandom(900)
+        payload = b"video-pipe-" + os.urandom(300)
         with tempfile.TemporaryDirectory() as tmp:
             src = os.path.join(tmp, "tiny.bin")
             out = os.path.join(tmp, "out.mp4")
             with open(src, "wb") as f:
                 f.write(payload)
             QRVideoGenerator(
-                qr_version=12, fps=4, qr_size=480, overhead=1.8, repeats=1
+                grid=32, fps=4, qr_size=480, overhead=1.8, repeats=1
             ).generate(src, out, session_id=123)
             decoder = VideoDecoder()
             ok = decoder.process_video(out)

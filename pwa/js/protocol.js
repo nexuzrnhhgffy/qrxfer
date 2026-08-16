@@ -418,16 +418,20 @@
     return { name: name, data: raw };
   }
 
-  function agreeParams(suggestedVersion, suggestedFps, camFps, camWidth) {
-    let maxVer = 12;
-    if (camWidth >= 900) maxVer = 15;
-    if (camWidth >= 1280) maxVer = 18;
-    if (camWidth >= 1800) maxVer = 22;
-    const qrVersion = Math.min(suggestedVersion | 0, maxVer);
+  function agreeParams(suggestedGrid, suggestedFps, camFps, camWidth) {
+    let maxG = 32;
+    if (camWidth >= 1000) maxG = 40;
+    if (camWidth >= 1600) maxG = 48;
+    const allowed = [24, 28, 32, 36, 40, 48];
+    const cap = Math.min(suggestedGrid | 0 || 40, maxG);
+    let grid = 32;
+    for (let i = 0; i < allowed.length; i++) {
+      if (allowed[i] <= cap) grid = allowed[i];
+    }
     const cam = (camFps || 30) | 0;
-    const maxFps = Math.max(2, Math.min(8, Math.floor(cam / 6) || 2));
-    const fps = Math.max(2, Math.min(suggestedFps | 0, maxFps));
-    return { qrVersion: qrVersion, fps: fps };
+    const maxFps = Math.max(2, Math.min(6, Math.floor(cam / 8) || 2));
+    const fps = Math.max(2, Math.min(suggestedFps | 0 || 4, maxFps));
+    return { qrVersion: grid, grid: grid, fps: fps };
   }
 
   function encodeHello(info) {

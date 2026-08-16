@@ -1,97 +1,30 @@
-"""Decode Qxfer packets from a recorded video (or a live camera recording)."""
+"""Decode Qxfer beacon-grid packets from a recorded video."""
 
 from __future__ import annotations
 
 import logging
 import os
 import time
-from typing import Callable, Iterable, List, Optional
+from typing import Callable, List, Optional
 
 import cv2
 import numpy as np
 
-from .lock import center_square, crop_lock, detect_lock_region
-from .protocol import TransferDecoder, decode_packet
+from .blockcode import TYPE_DATA, decode_image as decode_beacon
+from .lock import detect_lock_region
+from .protocol import TransferDecoder
 
 logger = logging.getLogger(__name__)
 
 
-def _try_zxing(image_bgr: np.ndarray) -> List[bytes]:
-    try:
-        import zxingcpp
-    except ImportError:
+def decode_image(image_bgr: np.ndarray) -> List[bytes]:
+    if image_bgr is None or image_bgr.size == 0:
         return []
     rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
-    results = []
-    try:
-        barcodes = zxingcpp.read_barcodes(rgb)
-    except Exception:
-        return []
-    for code in barcodes:
-        raw = getattr(code, "bytes", None)
-        if raw is None:
-            raw = getattr(code, "raw_bytes", None)
-        if raw is None:
-            text = getattr(code, "text", None)
-            if text:
-                raw = text.encode("latin1", "replace")
-        if raw:
-            results.append(bytes(raw))
-    return results
-
-
-def _try_opencv(image_bgr: np.ndarray) -> List[bytes]:
-    detector = cv2.QRCodeDetector()
-    try:
-        ok, decoded, _pts, _straight = detector.detectAndDecodeMulti(image_bgr)
-        if ok and decoded:
-            out = []
-            for item in decoded:
-                if not item:
-                    continue
-                if isinstance(item, bytes):
-                    out.append(item)
-                else:
-                    out.append(item.encode("latin1", "replace"))
-            return out
-    except Exception:
-        pass
-    try:
-        data, _pts = detector.detectAndDecode(image_bgr)
-        if data:
-            return [data.encode("latin1", "replace") if isinstance(data, str) else bytes(data)]
-    except Exception:
-        pass
+    got = decode_beacon(rgb)
+    if got and got[0] == TYPE_DATA:
+        return [got[1]]
     return []
-
-
-def decode_image(image_bgr: np.ndarray) -> List[bytes]:
-    variants = [image_bgr]
-    cropped = crop_lock(image_bgr)
-    if cropped is not None and cropped.size:
-        variants.append(cropped)
-    variants.append(center_square(image_bgr, 0.82))
-    variants.append(center_square(image_bgr, 0.64))
-
-    seen = set()
-    found: List[bytes] = []
-    for img in variants:
-        if img is None or img.size == 0:
-            continue
-        h, w = img.shape[:2]
-        if max(h, w) > 1400:
-            scale = 1400 / max(h, w)
-            img = cv2.resize(
-                img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA
-            )
-        for fn in (_try_zxing, _try_opencv):
-            for payload in fn(img):
-                if payload and payload not in seen:
-                    seen.add(payload)
-                    found.append(payload)
-        if found:
-            return found
-    return found
 
 
 class VideoDecoder:
