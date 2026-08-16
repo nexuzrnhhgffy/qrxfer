@@ -58,6 +58,26 @@ class FountainTests(unittest.TestCase):
         self.assertEqual(name, "note.txt")
         self.assertEqual(data, payload)
 
+    def test_lzma_and_handshake(self):
+        from qrxfer.protocol import (
+            agree_params,
+            compress_payload,
+            decompress_payload,
+            encode_hello,
+            parse_control,
+        )
+
+        data = (b"qrxfer " * 800) + bytes(range(64))
+        packed = compress_payload(data)
+        self.assertLess(len(packed), len(data) // 2)
+        self.assertEqual(decompress_payload(packed, 2), data)
+        hello = encode_hello({"s": 9, "n": "a.txt", "v": 18, "f": 5})
+        parsed = parse_control(hello)
+        self.assertEqual(parsed["type"], "H")
+        self.assertEqual(parsed["s"], 9)
+        self.assertEqual(agree_params(25, 8, 30, 720), (12, 5))
+        self.assertEqual(agree_params(18, 5, 60, 1920), (18, 5))
+
 
 class QrPipelineTests(unittest.TestCase):
     def test_qr_image_roundtrip(self):

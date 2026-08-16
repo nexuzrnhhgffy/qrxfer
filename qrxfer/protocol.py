@@ -1,7 +1,9 @@
-"""Binary packet codec and source-blob (filename + zlib) helpers."""
+"""Binary packet codec, LZMA source blob, and optical handshake helpers."""
 
 from __future__ import annotations
 
+import json
+import lzma
 import os
 import struct
 import zlib
@@ -78,18 +80,29 @@ def decode_packet(raw: bytes) -> Optional[Packet]:
     return Packet(session_id, seq, k, block_size, total_len, payload)
 
 
+def compress_payload(data: bytes) -> bytes:
+    """Maximum lossless LZMA (legacy .lzma / FORMAT_ALONE), matching lzma-js."""
+    return lzma.compress(data, format=lzma.FORMAT_ALONE, preset=9)
+
+
+def decompress_payload(compressed: bytes, version: int) -> bytes:
+    if version >= 2:
+        return lzma.decompress(compressed, format=lzma.FORMAT_ALONE)
+    return zlib.decompress(compressed)
+
+
 def build_source(filename: str, data: bytes) -> bytes:
     name_b = os.path.basename(filename).encode("utf-8")[:MAX_NAME_BYTES]
     header = struct.pack("<BB", PROTOCOL_VERSION, len(name_b)) + name_b
     header += struct.pack("<II", len(data), crc32(data))
-    return header + zlib.compress(data, 9)
+    return header + compress_payload(data)
 
 
 def parse_source(blob: bytes) -> Tuple[str, bytes]:
     if len(blob) < 10:
         raise ValueError("Source blob too small")
     version = blob[0]
-    if version != PROTOCOL_VERSION:
+    if version not in (1, 2):
         raise ValueError(f"Unsupported source version: {version}")
     name_len = blob[1]
     if len(blob) < 2 + name_len + 8:
@@ -97,12 +110,58 @@ def parse_source(blob: bytes) -> Tuple[str, bytes]:
     name = blob[2 : 2 + name_len].decode("utf-8")
     orig_size, orig_crc = struct.unpack_from("<II", blob, 2 + name_len)
     compressed = blob[2 + name_len + 8 :]
-    raw = zlib.decompress(compressed)
+    raw = decompress_payload(compressed, version)
     if len(raw) != orig_size:
         raise ValueError("Decompressed size mismatch")
     if crc32(raw) != orig_crc:
         raise ValueError("Original file CRC mismatch")
     return name, raw
+
+
+def agree_params(suggested_version: int, suggested_fps: int, cam_fps: float, cam_width: int) -> Tuple[int, int]:
+    """Pick a QR version and FPS both cameras can actually keep up with."""
+    if cam_width >= 1800:
+        max_ver = 22
+    elif cam_width >= 1280:
+        max_ver = 18
+    elif cam_width >= 900:
+        max_ver = 15
+    else:
+        max_ver = 12
+    version = min(int(suggested_version), max_ver)
+    cam = int(cam_fps or 30)
+    max_fps = max(2, min(8, cam // 6 or 2))
+    fps = max(2, min(int(suggested_fps), max_fps))
+    return version, fps
+
+
+def encode_hello(info: dict) -> str:
+    return "QXF2H" + json.dumps(info, separators=(",", ":"), ensure_ascii=False)
+
+
+def encode_ack(info: dict) -> str:
+    return "QXF2A" + json.dumps(info, separators=(",", ":"), ensure_ascii=False)
+
+
+def encode_go(info: dict) -> str:
+    return "QXF2G" + json.dumps(info, separators=(",", ":"), ensure_ascii=False)
+
+
+def parse_control(text: str) -> Optional[dict]:
+    if not text:
+        return None
+    text = text.strip()
+    for prefix, kind in (("QXF2H", "H"), ("QXF2A", "A"), ("QXF2G", "G")):
+        if text.startswith(prefix):
+            try:
+                data = json.loads(text[len(prefix) :])
+            except json.JSONDecodeError:
+                return None
+            if not isinstance(data, dict):
+                return None
+            data["type"] = kind
+            return data
+    return None
 
 
 class TransferEncoder:

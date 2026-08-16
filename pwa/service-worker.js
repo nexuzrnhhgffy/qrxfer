@@ -1,10 +1,11 @@
-const CACHE_NAME = "qrxfer-v2";
+const CACHE_NAME = "qrxfer-v3";
 const urlsToCache = [
     "/",
     "/index.html",
     "/styles.css",
     "/js/app.js",
     "/js/protocol.js",
+    "/js/lzma_worker.min.js",
     "/manifest.json",
 ];
 

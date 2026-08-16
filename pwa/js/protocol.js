@@ -4,7 +4,7 @@
  */
 (function (root) {
   const MAGIC = [0x51, 0x58, 0x46, 0x31]; // QXF1
-  const PROTOCOL_VERSION = 1;
+  const PROTOCOL_VERSION = 2;
   const HEADER_SIZE = 20;
   const CRC_SIZE = 4;
   const PACKET_OVERHEAD = HEADER_SIZE + CRC_SIZE;
@@ -386,11 +386,11 @@
     return new TextDecoder("utf-8").decode(bytes);
   }
 
-  function buildSource(filename, data, deflateFn) {
+  function buildSource(filename, data, compressFn) {
     const base = filename.split(/[\\/]/).pop() || "file.bin";
     let nameBytes = utf8Encode(base);
     if (nameBytes.length > MAX_NAME_BYTES) nameBytes = nameBytes.subarray(0, MAX_NAME_BYTES);
-    const compressed = deflateFn(data);
+    const compressed = compressFn(data);
     const header = new Uint8Array(2 + nameBytes.length + 8 + compressed.length);
     header[0] = PROTOCOL_VERSION;
     header[1] = nameBytes.length;
@@ -402,23 +402,63 @@
     return header;
   }
 
-  function parseSource(blob, inflateFn) {
+  async function parseSource(blob, inflateFn) {
     if (blob.length < 10) throw new Error("Source blob too small");
-    if (blob[0] !== PROTOCOL_VERSION) throw new Error("Unsupported source version");
+    const version = blob[0];
+    if (version !== 1 && version !== 2) throw new Error("Unsupported source version");
     const nameLen = blob[1];
     const name = utf8Decode(blob.subarray(2, 2 + nameLen));
     const view = new DataView(blob.buffer, blob.byteOffset, blob.byteLength);
     const origSize = view.getUint32(2 + nameLen, true);
     const origCrc = view.getUint32(2 + nameLen + 4, true);
     const compressed = blob.subarray(2 + nameLen + 8);
-    const raw = inflateFn(compressed);
+    const raw = await inflateFn(compressed, version);
     if (raw.length !== origSize) throw new Error("Decompressed size mismatch");
     if (crc32(raw) !== origCrc) throw new Error("Original file CRC mismatch");
     return { name: name, data: raw };
   }
 
-  function TransferEncoder(filename, data, blockSize, sessionId, deflateFn) {
-    this.source = buildSource(filename, data, deflateFn);
+  function agreeParams(suggestedVersion, suggestedFps, camFps, camWidth) {
+    let maxVer = 12;
+    if (camWidth >= 900) maxVer = 15;
+    if (camWidth >= 1280) maxVer = 18;
+    if (camWidth >= 1800) maxVer = 22;
+    const qrVersion = Math.min(suggestedVersion | 0, maxVer);
+    const cam = (camFps || 30) | 0;
+    const maxFps = Math.max(2, Math.min(8, Math.floor(cam / 6) || 2));
+    const fps = Math.max(2, Math.min(suggestedFps | 0, maxFps));
+    return { qrVersion: qrVersion, fps: fps };
+  }
+
+  function encodeHello(info) {
+    return "QXF2H" + JSON.stringify(info);
+  }
+  function encodeAck(info) {
+    return "QXF2A" + JSON.stringify(info);
+  }
+  function encodeGo(info) {
+    return "QXF2G" + JSON.stringify(info);
+  }
+  function parseControl(text) {
+    if (!text || typeof text !== "string") return null;
+    const prefixes = { QXF2H: "H", QXF2A: "A", QXF2G: "G" };
+    for (const p in prefixes) {
+      if (text.indexOf(p) === 0) {
+        try {
+          const data = JSON.parse(text.slice(p.length));
+          if (!data || typeof data !== "object") return null;
+          data.type = prefixes[p];
+          return data;
+        } catch (e) {
+          return null;
+        }
+      }
+    }
+    return null;
+  }
+
+  function TransferEncoder(filename, data, blockSize, sessionId, compressFn) {
+    this.source = buildSource(filename, data, compressFn);
     this.lt = new LTEncoder(this.source, blockSize, sessionId);
     this.sessionId = this.lt.sessionId;
     this.blockSize = blockSize;
@@ -466,6 +506,12 @@
     parseSource: parseSource,
     TransferEncoder: TransferEncoder,
     TransferDecoder: TransferDecoder,
+    agreeParams: agreeParams,
+    encodeHello: encodeHello,
+    encodeAck: encodeAck,
+    encodeGo: encodeGo,
+    parseControl: parseControl,
+    PROTOCOL_VERSION: PROTOCOL_VERSION,
   };
 
   if (typeof module !== "undefined" && module.exports) {

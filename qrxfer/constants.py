@@ -1,7 +1,7 @@
 """Shared constants for the Qxfer optical transfer protocol."""
 
 MAGIC = b"QXF1"
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
 HEADER_SIZE = 20  # bytes before payload
 CRC_SIZE = 4
 PACKET_OVERHEAD = HEADER_SIZE + CRC_SIZE  # 24
