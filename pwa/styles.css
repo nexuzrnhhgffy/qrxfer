@@ -35,6 +35,12 @@ html, body {
     margin-bottom: 12px;
 }
 
+.home-error {
+    text-align: center;
+    color: #ff8a80;
+    font-size: 0.95rem;
+}
+
 .mega {
     border: 0;
     border-radius: 28px;

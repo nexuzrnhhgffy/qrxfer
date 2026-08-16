@@ -13,7 +13,7 @@ from typing import Optional, Tuple
 from .constants import CRC_SIZE, MAGIC, MAX_NAME_BYTES, PACKET_OVERHEAD, PROTOCOL_VERSION
 from .fountain import LTDecoder, LTEncoder
 
-HEADER_STRUCT = struct.Struct("<4sI I H H I")  # magic, session, seq, k, block_size, total_len
+HEADER_STRUCT = struct.Struct("<4sI I I H I")  # magic, session, seq, k, block_size, total_len
 
 
 def crc32(data: bytes) -> int:
@@ -34,7 +34,7 @@ class Packet:
             MAGIC,
             self.session_id & 0xFFFFFFFF,
             self.seq & 0xFFFFFFFF,
-            self.k,
+            self.k & 0xFFFFFFFF,
             self.block_size,
             self.total_len & 0xFFFFFFFF,
         )

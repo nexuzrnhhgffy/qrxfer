@@ -8,7 +8,7 @@
   const TYPE_DATA = 2;
   const HANDSHAKE_GRID = 32;
   const SUGGESTED_GRID = 40;
-  const PACKET_OVERHEAD = 24;
+  const PACKET_OVERHEAD = 26;
 
   const FINDER_TL = [
     [1, 1, 1, 1, 1],

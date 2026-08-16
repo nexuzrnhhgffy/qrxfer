@@ -1,10 +1,13 @@
 """Shared constants for the Qxfer optical transfer protocol."""
 
+from __future__ import annotations
+
 MAGIC = b"QXF1"
 PROTOCOL_VERSION = 2
-HEADER_SIZE = 20  # bytes before payload
+HEADER_SIZE = 22  # magic + session + seq + k + block_size + total_len
 CRC_SIZE = 4
-PACKET_OVERHEAD = HEADER_SIZE + CRC_SIZE  # 24
+PACKET_OVERHEAD = HEADER_SIZE + CRC_SIZE  # 26
+MAX_FILE_BYTES = 1024 * 1024 * 1024  # 1 GiB; any smaller file is allowed
 
 # Byte-mode capacity at error-correction level L (ISO/IEC 18004).
 QR_BYTE_CAPACITY_L = {
@@ -48,6 +51,13 @@ DEFAULT_OVERHEAD = 1.7
 LOCK_COLOR = (0, 230, 118)  # RGB green used as the camera-lock frame
 LOCK_BORDER = 28
 MAX_NAME_BYTES = 180
+
+
+def ensure_file_size(num_bytes: int, path: str | None = None) -> int:
+    if num_bytes > MAX_FILE_BYTES:
+        label = path or "file"
+        raise ValueError(f"{label} is larger than 1 GB")
+    return num_bytes
 
 
 def block_size_for_version(qr_version: int) -> int:

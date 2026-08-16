@@ -11,7 +11,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 from .blockcode import block_size_for_grid, encode_data, render_grid
-from .constants import DEFAULT_OVERHEAD, DEFAULT_PRESET, LOCK_COLOR, PRESETS
+from .constants import DEFAULT_OVERHEAD, DEFAULT_PRESET, LOCK_COLOR, PRESETS, ensure_file_size
 from .protocol import TransferEncoder
 from .video_writer import VideoWriter
 
@@ -70,6 +70,7 @@ class QRVideoGenerator:
     def generate(self, input_file, output_video, session_id: Optional[int] = None):
         if not os.path.exists(input_file):
             raise FileNotFoundError(input_file)
+        ensure_file_size(os.path.getsize(input_file), input_file)
         with open(input_file, "rb") as f:
             data = f.read()
         session_id = secrets.randbits(32) if session_id is None else session_id
@@ -117,6 +118,7 @@ class QRVideoGenerator:
     def preview(self, input_file, session_id: Optional[int] = None):
         import cv2
 
+        ensure_file_size(os.path.getsize(input_file), input_file)
         with open(input_file, "rb") as f:
             data = f.read()
         session_id = secrets.randbits(32) if session_id is None else session_id

@@ -24,7 +24,8 @@ const pkt = Array.from(Q.encodePacket(7, 3, 4, 16, 50, payload));
 const mixes = [];
 for (let seq = 0; seq < 8; seq++) mixes.push(Q.mix32(session, seq));
 const agreed = Q.agreeParams(40, 5, 30, 720);
-console.log(JSON.stringify({neigh, pkt, mixes, crc: Q.crc32(payload), agreed}));
+const big = Array.from(Q.encodePacket(1, 2, 70000, 16, 50, payload));
+console.log(JSON.stringify({neigh, pkt, mixes, crc: Q.crc32(payload), agreed, big, bigK: Q.decodePacket(big).k, maxFile: Q.MAX_FILE_BYTES}));
 """
         proc = subprocess.run(
             ["node", "-e", script, str(JS)],
@@ -43,3 +44,6 @@ console.log(JSON.stringify({neigh, pkt, mixes, crc: Q.crc32(payload), agreed}));
             self.assertEqual(value, mix32(123456789, seq), f"mix seq={seq}")
         self.assertEqual(js["agreed"]["qrVersion"], agree_params(40, 5, 30, 720)[0])
         self.assertEqual(js["agreed"]["fps"], agree_params(40, 5, 30, 720)[1])
+        self.assertEqual(js["bigK"], 70000)
+        self.assertEqual(js["big"], list(encode_packet(1, 2, 70000, 16, 50, payload)))
+        self.assertEqual(js["maxFile"], 1024 * 1024 * 1024)

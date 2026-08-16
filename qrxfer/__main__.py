@@ -8,7 +8,7 @@ import os
 import sys
 import tempfile
 
-from .constants import DEFAULT_PRESET, PRESETS
+from .constants import DEFAULT_PRESET, PRESETS, ensure_file_size
 from .decoder import VideoDecoder, record_camera
 from .generator import QRVideoGenerator
 
@@ -19,6 +19,7 @@ def _setup_logging(verbose: bool) -> None:
 
 
 def cmd_send(args) -> int:
+    ensure_file_size(os.path.getsize(args.input), args.input)
     gen = QRVideoGenerator(
         qr_version=args.qr_version,
         fps=args.fps,

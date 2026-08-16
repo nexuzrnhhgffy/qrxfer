@@ -5,11 +5,12 @@
 (function (root) {
   const MAGIC = [0x51, 0x58, 0x46, 0x31]; // QXF1
   const PROTOCOL_VERSION = 2;
-  const HEADER_SIZE = 20;
+  const HEADER_SIZE = 22;
   const CRC_SIZE = 4;
   const PACKET_OVERHEAD = HEADER_SIZE + CRC_SIZE;
   const QR_SLACK = 4;
   const MAX_NAME_BYTES = 180;
+  const MAX_FILE_BYTES = 1024 * 1024 * 1024;
 
   const QR_BYTE_CAPACITY_L = {
     8: 192, 10: 271, 11: 321, 12: 367, 13: 425, 14: 458, 15: 520,
@@ -144,9 +145,9 @@
     body[0] = MAGIC[0]; body[1] = MAGIC[1]; body[2] = MAGIC[2]; body[3] = MAGIC[3];
     view.setUint32(4, sessionId >>> 0, true);
     view.setUint32(8, seq >>> 0, true);
-    view.setUint16(12, k, true);
-    view.setUint16(14, blockSize, true);
-    view.setUint32(16, totalLen >>> 0, true);
+    view.setUint32(12, k >>> 0, true);
+    view.setUint16(16, blockSize, true);
+    view.setUint32(18, totalLen >>> 0, true);
     body.set(payload, HEADER_SIZE);
     const out = new Uint8Array(body.length + 4);
     out.set(body, 0);
@@ -172,9 +173,9 @@
     const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
     const sessionId = view.getUint32(4, true);
     const seq = view.getUint32(8, true);
-    const k = view.getUint16(12, true);
-    const blockSize = view.getUint16(14, true);
-    const totalLen = view.getUint32(16, true);
+    const k = view.getUint32(12, true);
+    const blockSize = view.getUint16(16, true);
+    const totalLen = view.getUint32(18, true);
     if (k < 1 || blockSize < 1) return null;
     const need = HEADER_SIZE + blockSize + CRC_SIZE;
     if (buf.length < need) return null;
@@ -516,6 +517,7 @@
     encodeGo: encodeGo,
     parseControl: parseControl,
     PROTOCOL_VERSION: PROTOCOL_VERSION,
+    MAX_FILE_BYTES: MAX_FILE_BYTES,
   };
 
   if (typeof module !== "undefined" && module.exports) {

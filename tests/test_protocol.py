@@ -3,9 +3,9 @@ import random
 import tempfile
 import unittest
 
-from qrxfer.constants import block_size_for_version
+from qrxfer.constants import HEADER_SIZE, MAX_FILE_BYTES, block_size_for_version, ensure_file_size
 from qrxfer.fountain import LTDecoder, LTEncoder, neighbors
-from qrxfer.protocol import TransferDecoder, TransferEncoder, decode_packet, encode_packet
+from qrxfer.protocol import HEADER_STRUCT, TransferDecoder, TransferEncoder, decode_packet, encode_packet
 
 
 class FountainTests(unittest.TestCase):
@@ -44,6 +44,22 @@ class FountainTests(unittest.TestCase):
         self.assertIsNotNone(pkt)
         self.assertEqual(pkt.payload, payload)
         self.assertIsNone(decode_packet(raw[:-1] + bytes([(raw[-1] ^ 1)])))
+
+    def test_header_size_and_large_k(self):
+        self.assertEqual(HEADER_STRUCT.size, HEADER_SIZE)
+        payload = bytes(range(16))
+        raw = encode_packet(1, 2, 70000, 16, 50, payload)
+        pkt = decode_packet(raw)
+        self.assertIsNotNone(pkt)
+        self.assertEqual(pkt.k, 70000)
+        self.assertEqual(pkt.payload, payload)
+
+    def test_file_size_limit(self):
+        self.assertEqual(ensure_file_size(0), 0)
+        self.assertEqual(ensure_file_size(MAX_FILE_BYTES), MAX_FILE_BYTES)
+        with self.assertRaises(ValueError):
+            ensure_file_size(MAX_FILE_BYTES + 1)
+
 
     def test_file_transfer_roundtrip(self):
         payload = b"hello qrxfer \x00\xff" * 200

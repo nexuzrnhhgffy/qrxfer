@@ -2,6 +2,7 @@ const $ = (id) => document.getElementById(id);
 
 const SUGGESTED_GRID = Beacon.SUGGESTED_GRID;
 const SUGGESTED_FPS = 4;
+const MAX_FILE_BYTES = Qxfer.MAX_FILE_BYTES;
 
 let running = false;
 let stream = null;
@@ -19,7 +20,7 @@ function lzmaCompress(bytes) {
       reject(new Error("LZMA در دسترس نیست"));
       return;
     }
-    LZMA_API.compress(Array.from(bytes), 9, (res, err) => {
+    LZMA_API.compress(bytes, 9, (res, err) => {
       if (err) reject(err);
       else resolve(res instanceof Uint8Array ? res : Uint8Array.from(res));
     });
@@ -28,7 +29,7 @@ function lzmaCompress(bytes) {
 
 function lzmaDecompress(bytes) {
   return new Promise((resolve, reject) => {
-    LZMA_API.decompress(Array.from(bytes), (res, err) => {
+    LZMA_API.decompress(bytes, (res, err) => {
       if (err) reject(err);
       else if (typeof res === "string") resolve(new TextEncoder().encode(res));
       else resolve(res instanceof Uint8Array ? res : Uint8Array.from(res));
@@ -42,6 +43,18 @@ function inflateSource(compressed, version) {
 
 function hud(text) {
   $("hud").textContent = text || "";
+}
+
+function homeError(text) {
+  const el = $("homeError");
+  if (!el) return;
+  if (!text) {
+    el.hidden = true;
+    el.textContent = "";
+    return;
+  }
+  el.hidden = false;
+  el.textContent = text;
 }
 
 function showHome() {
@@ -101,27 +114,26 @@ function stopPlay() {
   encoder = null;
 }
 
-function cameraInfo() {
-  const track = stream && stream.getVideoTracks()[0];
-  const s = track ? track.getSettings() : {};
-  return {
-    camFps: s.frameRate || 30,
-    width: s.width || $("cam").videoWidth || 1280,
-  };
-}
-
 $("btnSend").addEventListener("click", () => $("fileInput").click());
 $("btnRecv").addEventListener("click", () => startReceive().catch(fail));
 $("btnClose").addEventListener("click", showHome);
 $("fileInput").addEventListener("change", async (e) => {
   const file = e.target.files && e.target.files[0];
   e.target.value = "";
-  if (file) startSend(file).catch(fail);
+  if (!file) return;
+  if (file.size > MAX_FILE_BYTES) {
+    homeError("فایل بزرگ‌تر از ۱ گیگابایت مجاز نیست");
+    return;
+  }
+  homeError("");
+  startSend(file).catch(fail);
 });
 
 function fail(err) {
   console.error(err);
-  hud(err && err.message ? err.message : String(err));
+  const msg = err && err.message ? err.message : String(err);
+  hud(msg);
+  homeError(msg);
 }
 
 function fitCanvas(split) {
@@ -151,42 +163,37 @@ async function startSend(file) {
   const sessionId = (Math.random() * 0xffffffff) >>> 0 || 1;
   const ratio = ((1 - compressed.length / Math.max(1, data.length)) * 100).toFixed(0);
   const sourceProbe = Qxfer.buildSource(file.name, data, () => compressed);
-  const hello = {
+  const grid = SUGGESTED_GRID;
+  const fps = SUGGESTED_FPS;
+  const blockSize = Beacon.blockSizeForGrid(grid);
+  encoder = new Qxfer.TransferEncoder(file.name, data, blockSize, sessionId, () => compressed);
+
+  hud(`فشرده شد ${ratio}٪ — این کد را به گیرنده نشان بده`);
+  drawControl(Qxfer.encodeHello({
     s: sessionId,
     t: sourceProbe.length,
     o: data.length,
     c: compressed.length,
     n: file.name,
-    v: SUGGESTED_GRID,
-    g: SUGGESTED_GRID,
-    f: SUGGESTED_FPS,
-  };
-
-  showStage("split");
-  await startCamera();
-  hud(`فشرده شد ${ratio}٪ — این کد را به گیرنده نشان بده`);
-  drawControl(Qxfer.encodeHello(hello), Beacon.HANDSHAKE_GRID);
-
-  const ack = await scanUntil((msg) => msg && msg.type === "A" && msg.s === sessionId, 120000, {
-    grids: [32, 28, 36, 24],
-  });
+    v: grid,
+    g: grid,
+    f: fps,
+    k: encoder.k,
+  }), Beacon.HANDSHAKE_GRID);
+  await sleep(2500);
   if (!running) return;
-  const agreed = Qxfer.agreeParams(hello.g || hello.v, hello.f, ack.cf, ack.w);
-  const grid = agreed.grid || agreed.qrVersion;
-  const blockSize = Beacon.blockSizeForGrid(grid);
-  encoder = new Qxfer.TransferEncoder(file.name, data, blockSize, sessionId, () => compressed);
 
-  showStage("full");
-  stopCamera();
-  hud("هماهنگ شد — آماده ارسال");
-  drawControl(Qxfer.encodeGo({ s: sessionId, v: grid, g: grid, f: agreed.fps, k: encoder.k }), Beacon.HANDSHAKE_GRID);
+  hud("آماده ارسال");
+  drawControl(Qxfer.encodeGo({ s: sessionId, v: grid, g: grid, f: fps, k: encoder.k }), Beacon.HANDSHAKE_GRID);
   await sleep(1200);
+  if (!running) return;
   for (let n = 3; n >= 1; n--) {
     drawSolid(String(n));
-    hud(`شروع با ${agreed.fps} فریم در ثانیه · شبکه ${grid}`);
+    hud(`شروع با ${fps} فریم در ثانیه · شبکه ${grid}`);
     await sleep(700);
+    if (!running) return;
   }
-  playData(grid, agreed.fps);
+  playData(grid, fps);
 }
 
 function playData(grid, fps) {
@@ -212,40 +219,29 @@ async function startReceive() {
   showStage("scan");
   hud("دوربین را روی کد سبز فرستنده بگیر");
   await startCamera();
-  const hello = await scanUntil((msg) => msg && msg.type === "H", 120000, {
-    grids: [32, 28, 36, 24],
-  });
-  if (!running) return;
-
-  const cam = cameraInfo();
-  const agreed = Qxfer.agreeParams(hello.g || hello.v, hello.f, cam.camFps, cam.width);
-  const grid = agreed.grid || agreed.qrVersion;
-  const ack = {
-    s: hello.s,
-    cf: cam.camFps,
-    w: cam.width,
-    v: grid,
-    g: grid,
-    f: agreed.fps,
-  };
-  showStage("split");
-  hud("این کد را به فرستنده نشان بده تا سرعت یکی شود");
-  drawControl(Qxfer.encodeAck(ack), Beacon.HANDSHAKE_GRID);
-  await sleep(2500);
-  showStage("scan");
-  hud("قفل شد. در حال خواندن داده…");
-  await collectData(agreed, grid);
+  await collectData();
 }
 
-async function collectData(agreed, grid) {
-  await scanUntil(() => {
+async function collectData() {
+  let fpsHint = SUGGESTED_FPS;
+  await scanUntil((msg) => {
     if (!running) return true;
+    if (msg && msg.type === "H") {
+      fpsHint = msg.f || fpsHint;
+      hud(`قفل شد${msg.n ? " · " + msg.n : ""} — در حال خواندن داده…`);
+    }
+    if (msg && msg.type === "G") {
+      fpsHint = msg.f || fpsHint;
+    }
     if (decoder.ready()) return true;
     const k = decoder.lt.k;
     const rec = decoder.lt.recoveredCount;
-    if (k) hud(`دریافت ${rec}/${k}  ·  ${agreed.fps} fps`);
+    if (k) hud(`دریافت ${rec}/${k}  ·  ${fpsHint} fps`);
     return false;
-  }, 300000, { ingestData: true, grids: [grid, grid - 4, grid + 4, 32, 40, 48].filter((n) => n >= 24) });
+  }, 300000, {
+    ingestData: true,
+    grids: [32, 40, 36, 28, 24, 48, 56],
+  });
 
   if (!running) return;
   if (!decoder.ready()) decoder.lt.finish();
@@ -289,20 +285,17 @@ function scanUntil(predicate, timeoutMs, opts) {
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const got = Beacon.decodeImageData(imageData, grids);
+        let control = null;
         if (got) {
           if (got.kind === Beacon.TYPE_CONTROL) {
             const text = new TextDecoder("utf-8").decode(got.data);
-            const control = Qxfer.parseControl(text);
-            if (control && predicate(control)) {
-              resolve(control);
-              return;
-            }
+            control = Qxfer.parseControl(text);
           } else if (ingestData && got.kind === Beacon.TYPE_DATA) {
             decoder.ingest(got.data);
           }
         }
-        if (predicate(null)) {
-          resolve(null);
+        if (predicate(control)) {
+          resolve(control);
           return;
         }
       }
