@@ -55,6 +55,7 @@ html, body {
 
 .stage.full #cam { display: none; }
 .stage.scan #qrCanvas { display: none; }
+.stage.split { grid-template-rows: 1fr 1fr; }
 .stage.scan { grid-template-rows: 1fr; }
 
 #cam, #qrCanvas {
