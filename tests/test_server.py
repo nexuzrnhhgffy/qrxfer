@@ -55,6 +55,56 @@ class FlaskServeTests(unittest.TestCase):
         self.assertIn("startCamera", recv_fn)
         self.assertIn("MAX_FILE_BYTES", js)
 
+    def test_session_api_handshake(self):
+        client = self.client
+        created = client.post(
+            "/api/sessions",
+            json={"name": "note.txt", "orig": 20, "compressed": 8, "grid": 40, "fps": 4, "optical": 1},
+        )
+        self.assertEqual(created.status_code, 200)
+        sess = created.get_json()
+        created.close()
+        code = sess["code"]
+        self.assertEqual(len(code), 6)
+
+        info = client.get("/api/info")
+        payload = info.get_json()
+        info.close()
+        self.assertIn("phone", payload)
+        self.assertIn("local", payload)
+
+        joined = client.post(f"/api/sessions/{code}/join", json={"camFps": 30, "width": 1280})
+        self.assertEqual(joined.status_code, 200)
+        self.assertEqual(joined.get_json()["status"], "joined")
+        joined.close()
+
+        too_soon = client.post(f"/api/sessions/{code}/start")
+        self.assertEqual(too_soon.status_code, 409)
+        too_soon.close()
+
+        offer = client.post(f"/api/sessions/{code}/offer", json={"k": 7, "optical": 1})
+        self.assertEqual(offer.status_code, 200)
+        offer.close()
+
+        start = client.post(f"/api/sessions/{code}/start")
+        self.assertEqual(start.status_code, 200)
+        self.assertEqual(start.get_json()["status"], "sending")
+        start.close()
+
+        prog = client.post(f"/api/sessions/{code}/progress", json={"recovered": 3, "k": 7})
+        self.assertEqual(prog.status_code, 200)
+        prog.close()
+
+        done = client.post(f"/api/sessions/{code}/done", json={"ok": True})
+        self.assertEqual(done.status_code, 200)
+        self.assertEqual(done.get_json()["status"], "done")
+        done.close()
+
+    def test_api_is_not_swallowed_by_static(self):
+        status, _, body = self._get("/api/info")
+        self.assertEqual(status, 200)
+        self.assertIn("phone", body)
+
     def test_beacon_stays_square_and_not_stretched(self):
         status, _, css = self._get("/styles.css")
         self.assertEqual(status, 200)

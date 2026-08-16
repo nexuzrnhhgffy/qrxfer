@@ -8,9 +8,12 @@ let running = false;
 let stream = null;
 let playTimer = null;
 let scanLoop = 0;
+let meetLoop = 0;
 let encoder = null;
 let decoder = null;
 let recoveredUrl = null;
+let activeCode = null;
+let lastPaint = null;
 
 const LZMA_API = window.LZMA || window.LZMA_WORKER;
 
@@ -57,15 +60,34 @@ function homeError(text) {
   el.textContent = text;
 }
 
+function setMeetCode(code) {
+  const el = $("meetCode");
+  if (!code) {
+    el.hidden = true;
+    el.textContent = "";
+    return;
+  }
+  el.hidden = false;
+  el.textContent = code;
+}
+
 function showHome() {
   running = false;
   lastPaint = null;
+  meetLoop += 1;
+  const code = activeCode;
+  activeCode = null;
+  if (code) {
+    fetch("/api/sessions/" + code + "/cancel", { method: "POST" }).catch(() => {});
+  }
   stopCamera();
   stopPlay();
   $("stage").hidden = true;
   $("home").hidden = false;
   $("guide").hidden = true;
   $("downloadLink").hidden = true;
+  $("btnStart").hidden = true;
+  setMeetCode("");
   if (recoveredUrl) {
     URL.revokeObjectURL(recoveredUrl);
     recoveredUrl = null;
@@ -115,8 +137,45 @@ function stopPlay() {
   encoder = null;
 }
 
+function cameraInfo() {
+  const track = stream && stream.getVideoTracks()[0];
+  const s = track ? track.getSettings() : {};
+  return {
+    camFps: s.frameRate || 30,
+    width: s.width || $("cam").videoWidth || 1280,
+  };
+}
+
+async function api(path, body) {
+  const opts = { headers: { "Content-Type": "application/json" } };
+  if (body !== undefined) {
+    opts.method = "POST";
+    opts.body = JSON.stringify(body);
+  }
+  const res = await fetch(path, opts);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || ("API " + res.status));
+  return data;
+}
+
+async function waitSession(code, pred, timeoutMs) {
+  const my = ++meetLoop;
+  const deadline = Date.now() + timeoutMs;
+  while (running && my === meetLoop) {
+    const sess = await api("/api/sessions/" + code);
+    if (sess.status === "error") throw new Error(sess.error || "نشست قطع شد");
+    if (pred(sess)) return sess;
+    if (Date.now() > deadline) throw new Error("زمان نشست تمام شد");
+    await sleep(400);
+  }
+  throw new Error("stopped");
+}
+
 $("btnSend").addEventListener("click", () => $("fileInput").click());
-$("btnRecv").addEventListener("click", () => startReceive().catch(fail));
+$("btnRecv").addEventListener("click", () => {
+  const code = ($("joinCode").value || "").trim();
+  startReceive(code).catch(fail);
+});
 $("btnClose").addEventListener("click", showHome);
 $("fileInput").addEventListener("change", async (e) => {
   const file = e.target.files && e.target.files[0];
@@ -133,12 +192,10 @@ $("fileInput").addEventListener("change", async (e) => {
 function fail(err) {
   console.error(err);
   const msg = err && err.message ? err.message : String(err);
+  if (msg === "stopped") return;
   hud(msg);
   homeError(msg);
 }
-
-let lastPaint = null;
-let resizeTick = 0;
 
 function fitCanvas(split) {
   const canvas = $("qrCanvas");
@@ -163,55 +220,86 @@ function drawData(packet, gridN) {
   Beacon.drawGrid(canvas, Beacon.encodeData(packet, gridN));
 }
 
+function helloPayload(sess, extra) {
+  return Object.assign({
+    j: sess.code,
+    s: sess.optical,
+    t: sess.compressed,
+    o: sess.orig,
+    n: sess.name,
+    v: sess.grid || sess.suggest_grid,
+    g: sess.grid || sess.suggest_grid,
+    f: sess.fps || sess.suggest_fps,
+    k: sess.k || 0,
+  }, extra || {});
+}
+
 async function startSend(file) {
   running = true;
   showStage("full");
   hud("در حال بیشترین فشرده‌سازی بدون‌اتلاف…");
   const data = new Uint8Array(await file.arrayBuffer());
   const compressed = await lzmaCompress(data);
-  const sessionId = (Math.random() * 0xffffffff) >>> 0 || 1;
+  const optical = (Math.random() * 0xffffffff) >>> 0 || 1;
   const ratio = ((1 - compressed.length / Math.max(1, data.length)) * 100).toFixed(0);
-  const sourceProbe = Qxfer.buildSource(file.name, data, () => compressed);
-  const grid = SUGGESTED_GRID;
-  const fps = SUGGESTED_FPS;
-  const blockSize = Beacon.blockSizeForGrid(grid);
-  encoder = new Qxfer.TransferEncoder(file.name, data, blockSize, sessionId, () => compressed);
+  let sess = await api("/api/sessions", {
+    name: file.name,
+    orig: data.length,
+    compressed: compressed.length,
+    grid: SUGGESTED_GRID,
+    fps: SUGGESTED_FPS,
+    optical: optical,
+  });
+  activeCode = sess.code;
+  setMeetCode(sess.code);
+  hud(`فشرده شد ${ratio}٪ — کد را به گیرنده بده و صبر کن`);
+  drawControl(Qxfer.encodeHello(helloPayload(sess)), Beacon.HANDSHAKE_GRID);
 
-  hud(`فشرده شد ${ratio}٪ — این کد را به گیرنده نشان بده`);
-  drawControl(Qxfer.encodeHello({
-    s: sessionId,
-    t: sourceProbe.length,
-    o: data.length,
-    c: compressed.length,
-    n: file.name,
-    v: grid,
-    g: grid,
-    f: fps,
-    k: encoder.k,
-  }), Beacon.HANDSHAKE_GRID);
-  await sleep(2500);
+  sess = await waitSession(sess.code, (s) => s.status === "joined" || s.status === "sending", 180000);
   if (!running) return;
+  const grid = sess.grid || SUGGESTED_GRID;
+  const fps = sess.fps || SUGGESTED_FPS;
+  const blockSize = Beacon.blockSizeForGrid(grid);
+  encoder = new Qxfer.TransferEncoder(file.name, data, blockSize, optical, () => compressed);
+  sess = await api("/api/sessions/" + sess.code + "/offer", { k: encoder.k, optical: optical });
+  hud("گیرنده وصل شد — منتظر «شروع کن»");
+  drawControl(Qxfer.encodeHello(helloPayload(sess)), Beacon.HANDSHAKE_GRID);
 
-  hud("آماده ارسال");
-  drawControl(Qxfer.encodeGo({ s: sessionId, v: grid, g: grid, f: fps, k: encoder.k }), Beacon.HANDSHAKE_GRID);
-  await sleep(1200);
+  sess = await waitSession(sess.code, (s) => s.status === "sending" || s.status === "done", 180000);
+  if (!running) return;
+  if (sess.status === "done") return;
+  setMeetCode("");
+  hud("هماهنگ شد — شروع ارسال");
+  drawControl(Qxfer.encodeGo(helloPayload(sess, { type: "G" })), Beacon.HANDSHAKE_GRID);
+  await sleep(900);
   if (!running) return;
   for (let n = 3; n >= 1; n--) {
     drawSolid(String(n));
     hud(`شروع با ${fps} فریم در ثانیه · شبکه ${grid}`);
-    await sleep(700);
+    await sleep(650);
     if (!running) return;
   }
-  playData(grid, fps);
+  playData(grid, fps, sess.code);
 }
 
-function playData(grid, fps) {
+function playData(grid, fps, code) {
   let seq = 0;
-  const tick = () => {
-    if (!running || !encoder) return;
+  const my = meetLoop;
+  const tick = async () => {
+    if (!running || !encoder || my !== meetLoop) return;
     try {
+      const sess = await api("/api/sessions/" + code);
+      if (sess.status === "done") {
+        drawSolid("✓");
+        hud("گیرنده فایل را کامل گرفت");
+        stopPlay();
+        return;
+      }
+      if (sess.status === "error") throw new Error(sess.error || "نشست قطع شد");
       drawData(encoder.packet(seq), grid);
-      hud(`${encoder.filename}  ·  ${seq + 1}  ·  ${fps} fps`);
+      const rec = (sess.progress && sess.progress.recovered) || 0;
+      const kk = (sess.progress && sess.progress.k) || encoder.k;
+      hud(`${encoder.filename}  ·  ${seq + 1}  ·  دریافت ${rec}/${kk}`);
       seq += 1;
     } catch (err) {
       fail(err);
@@ -222,43 +310,102 @@ function playData(grid, fps) {
   tick();
 }
 
-async function startReceive() {
+async function startReceive(typedCode) {
   running = true;
   decoder = new Qxfer.TransferDecoder(inflateSource);
+  $("btnStart").hidden = true;
   showStage("scan");
-  hud("دوربین را روی کد سبز فرستنده بگیر");
-  await startCamera();
-  await collectData();
+  hud("دوربین را باز می‌کنم…");
+  try {
+    await startCamera();
+  } catch (err) {
+    throw new Error("دوربین روی این آدرس باز نشد. از گوشی آدرس USB لپ‌تاپ را بزنید، یا USB debugging را روشن کنید تا http://127.0.0.1:8080 کار کند.");
+  }
+  const cam = cameraInfo();
+  let code = (typedCode || "").trim().toUpperCase();
+  if (!code) {
+    hud("کد سبز فرستنده را اسکن کن یا کد نشست را وارد کن");
+    const hello = await scanUntil((msg) => msg && msg.type === "H" && (msg.j || msg.s), 120000, {
+      grids: [32, 28, 36, 24],
+    });
+    if (!running) return;
+    code = hello.j || "";
+    if (!code) throw new Error("کد نشست در تصویر نبود");
+  }
+  let sess = await api("/api/sessions/" + code + "/join", cam);
+  activeCode = sess.code;
+  $("joinCode").value = sess.code;
+  hud(`${sess.name || "فایل"} — وقتی آماده بودی شروع کن`);
+  await waitSession(sess.code, (s) => s.k, 120000);
+  if (!running) return;
+  $("btnStart").hidden = false;
+  await new Promise((resolve, reject) => {
+    const my = meetLoop;
+    const btn = $("btnStart");
+    const onClick = () => {
+      btn.removeEventListener("click", onClick);
+      resolve();
+    };
+    btn.addEventListener("click", onClick);
+    const watch = async () => {
+      try {
+        while (running && my === meetLoop) {
+          const s = await api("/api/sessions/" + sess.code);
+          if (s.status === "sending" || s.status === "done") {
+            btn.removeEventListener("click", onClick);
+            resolve();
+            return;
+          }
+          if (s.status === "error") throw new Error(s.error || "نشست قطع شد");
+          await sleep(400);
+        }
+        reject(new Error("stopped"));
+      } catch (err) {
+        btn.removeEventListener("click", onClick);
+        reject(err);
+      }
+    };
+    watch();
+  });
+  if (!running) return;
+  $("btnStart").hidden = true;
+  sess = await api("/api/sessions/" + sess.code + "/start", {});
+  hud("قفل شد. در حال خواندن داده…");
+  await collectData(sess);
 }
 
-async function collectData() {
-  let fpsHint = SUGGESTED_FPS;
+async function collectData(sess) {
+  const fpsHint = sess.fps || SUGGESTED_FPS;
+  let lastPost = 0;
   await scanUntil((msg) => {
     if (!running) return true;
-    if (msg && msg.type === "H") {
-      fpsHint = msg.f || fpsHint;
-      hud(`قفل شد${msg.n ? " · " + msg.n : ""} — در حال خواندن داده…`);
-    }
-    if (msg && msg.type === "G") {
-      fpsHint = msg.f || fpsHint;
-    }
     if (decoder.ready()) return true;
     const k = decoder.lt.k;
     const rec = decoder.lt.recoveredCount;
     if (k) hud(`دریافت ${rec}/${k}  ·  ${fpsHint} fps`);
+    const now = Date.now();
+    if (k && now - lastPost > 700) {
+      lastPost = now;
+      api("/api/sessions/" + sess.code + "/progress", {
+        recovered: rec,
+        k: k,
+      }).catch(() => {});
+    }
     return false;
   }, 300000, {
     ingestData: true,
-    grids: [32, 40, 36, 28, 24, 48, 56],
+    grids: [sess.grid, 32, 40, 36, 28, 24, 48, 56].filter((n, i, arr) => n && n >= 24 && arr.indexOf(n) === i),
   });
 
   if (!running) return;
   if (!decoder.ready()) decoder.lt.finish();
   if (!decoder.ready()) {
+    await api("/api/sessions/" + sess.code + "/done", { ok: false, error: "incomplete" });
     throw new Error("فایل کامل نشد. نزدیک‌تر بایستید و تکرار کنید.");
   }
   hud("در حال باز کردن فایل…");
   const file = await decoder.result();
+  await api("/api/sessions/" + sess.code + "/done", { ok: true });
   const blob = new Blob([file.data]);
   recoveredUrl = URL.createObjectURL(blob);
   const link = $("downloadLink");
@@ -344,3 +491,18 @@ if (window.visualViewport) {
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
+
+fetch("/api/info")
+  .then((r) => r.json())
+  .then((info) => {
+    const el = $("lanHint");
+    if (!el) return;
+    const urls = (info.phone || []).concat(info.adb ? ["http://127.0.0.1:" + info.port + "/"] : []);
+    if (info.phone && info.phone.length) {
+      el.textContent = "از گوشی این آدرس را باز کنید:\n" + info.phone.join("\n");
+      el.style.whiteSpace = "pre-line";
+    } else {
+      el.textContent = "از گوشی آدرس IP لپ‌تاپ روی USB را بزنید، نه 127.0.0.1";
+    }
+  })
+  .catch(() => {});

@@ -45,6 +45,27 @@ html, body {
     font-size: 0.95rem;
 }
 
+.lan-hint {
+    text-align: center;
+    font-size: 0.82rem;
+    line-height: 1.5;
+    color: #9eeabd;
+    direction: ltr;
+    word-break: break-all;
+}
+
+.join-code {
+    border: 1px solid #2a3a44;
+    background: #12181e;
+    color: #fff;
+    border-radius: 16px;
+    padding: 12px 14px;
+    font-size: 1.2rem;
+    letter-spacing: 0.28em;
+    text-align: center;
+    text-transform: uppercase;
+}
+
 .mega {
     border: 0;
     border-radius: 28px;
@@ -138,6 +159,35 @@ html, body {
     right: calc(14px + env(safe-area-inset-right));
     background: #00e676;
     color: #06210f;
+}
+
+.meet-code {
+    position: absolute;
+    top: calc(58px + env(safe-area-inset-top));
+    left: 0;
+    right: 0;
+    text-align: center;
+    font-size: clamp(1.8rem, 8vw, 2.6rem);
+    letter-spacing: 0.28em;
+    font-weight: 800;
+    color: #00e676;
+    direction: ltr;
+}
+
+.start-btn {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: calc(72px + env(safe-area-inset-bottom));
+    border: 0;
+    border-radius: 999px;
+    padding: 14px 28px;
+    font-size: 1.2rem;
+    font-weight: 800;
+    background: #00e676;
+    color: #06210f;
+    cursor: pointer;
+    z-index: 3;
 }
 
 .stage[hidden], .home[hidden] { display: none !important; }

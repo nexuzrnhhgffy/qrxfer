@@ -14,7 +14,9 @@
         <h1>Qxfer</h1>
         <p class="tagline">انتقال فایل با نور</p>
         <p class="hint">بدون CDN — اگر صفحهٔ QR قدیمی می‌بینید Ctrl+F5 بزنید</p>
+        <p id="lanHint" class="lan-hint"></p>
         <p id="homeError" class="home-error" hidden></p>
+        <input id="joinCode" class="join-code" type="text" maxlength="8" placeholder="کد نشست" autocomplete="off" autocapitalize="characters" spellcheck="false" dir="ltr">
         <button id="btnSend" class="mega send" type="button">ارسال</button>
         <button id="btnRecv" class="mega recv" type="button">دریافت</button>
         <input id="fileInput" type="file" hidden>
@@ -26,6 +28,8 @@
         <div id="guide" class="guide" hidden></div>
         <div id="hud" class="hud"></div>
         <button id="btnClose" class="close" type="button">بستن</button>
+        <div id="meetCode" class="meet-code" hidden></div>
+        <button id="btnStart" class="start-btn" hidden type="button">شروع کن</button>
         <a id="downloadLink" class="download" hidden>دانلود فایل</a>
     </section>
 

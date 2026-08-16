@@ -97,7 +97,7 @@ def build_parser() -> argparse.ArgumentParser:
     recv.set_defaults(func=cmd_receive)
 
     srv = sub.add_parser("serve", help="Open the browser send/receive UI")
-    srv.add_argument("--host", default="127.0.0.1")
+    srv.add_argument("--host", default="0.0.0.0")
     srv.add_argument("--port", type=int, default=8080)
     srv.add_argument("--no-browser", action="store_true")
     srv.set_defaults(func=cmd_serve)
