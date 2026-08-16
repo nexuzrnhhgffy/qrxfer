@@ -1,77 +1,95 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fa" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Scan QR codes with green borders to transfer files">
-    <meta name="theme-color" content="#00ff00">
-    <title>QR Transfer Scanner</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="description" content="انتقال فایل با QR مثل ShareIt، بدون وای‌فای">
+    <meta name="theme-color" content="#00e676">
+    <title>Qxfer — انتقال فایل با QR</title>
     <link rel="manifest" href="manifest.json">
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>QR Transfer Scanner</h1>
-            <p class="subtitle">Scan QR codes with green borders from video</p>
+    <div class="app">
+        <header class="top">
+            <h1>Qxfer</h1>
+            <p class="subtitle">انتقال فایل با نور — بدون وای‌فای و بلوتوث</p>
+            <nav class="tabs">
+                <button class="tab active" data-tab="send">ارسال</button>
+                <button class="tab" data-tab="receive">دریافت</button>
+            </nav>
         </header>
 
-        <div class="scanner-section">
-            <div class="video-container">
-                <video id="video" autoplay playsinline></video>
-                <canvas id="canvas" style="display: none;"></canvas>
-                <div class="overlay">
-                    <div class="scan-frame"></div>
-                </div>
+        <section id="sendPanel" class="panel">
+            <label class="file-pick">
+                <input type="file" id="sendFile">
+                <span id="sendFileLabel">انتخاب فایل</span>
+            </label>
+            <div class="row">
+                <label>کیفیت
+                    <select id="preset">
+                        <option value="reliable">قابل اطمینان — موبایل / فاصله</option>
+                        <option value="balanced" selected>متعادل — پیشنهادی</option>
+                        <option value="fast">سریع — نزدیک و نور خوب</option>
+                    </select>
+                </label>
             </div>
-            
+            <p id="sendMeta" class="hint">فایل را انتخاب کنید. کدها تمام‌صفحه پخش می‌شوند تا طرف مقابل ضبط کند.</p>
+            <button id="playBtn" class="btn btn-primary" disabled>پخش تمام‌صفحه</button>
+            <button id="stopPlayBtn" class="btn btn-secondary" hidden>توقف پخش</button>
+        </section>
+
+        <section id="receivePanel" class="panel" hidden>
+            <p class="hint">اول کامل ضبط کنید، بعد تحلیل. کادر سبز را روی QR طرف مقابل منطبق کنید تا قفل شود.</p>
+            <div class="video-wrap">
+                <video id="liveVideo" autoplay playsinline muted></video>
+                <canvas id="overlay"></canvas>
+                <div class="scan-guide"></div>
+                <div id="lockBadge" class="lock-badge">در انتظار قفل</div>
+            </div>
             <div class="controls">
-                <button id="startBtn" class="btn btn-primary">Start Camera</button>
-                <button id="stopBtn" class="btn btn-secondary" disabled>Stop Camera</button>
+                <button id="camBtn" class="btn btn-primary">روشن کردن دوربین</button>
+                <button id="recordBtn" class="btn btn-record" disabled>شروع ضبط</button>
+                <button id="torchBtn" class="btn btn-ghost" disabled>چراغ</button>
             </div>
-        </div>
-
-        <div class="status-section">
+            <label class="file-pick small">
+                <input type="file" id="videoFile" accept="video/*">
+                <span>یا یک ویدیوی از قبل ضبط‌شده انتخاب کنید</span>
+            </label>
             <div class="status-card">
-                <h3>Scan Status</h3>
-                <div id="statusText" class="status-text">Ready to scan</div>
-                <div class="progress-info">
-                    <div>Chunks scanned: <span id="chunksScanned">0</span></div>
-                    <div>Total chunks: <span id="totalChunks">-</span></div>
-                    <div class="progress-bar">
-                        <div id="progressFill" class="progress-fill"></div>
-                    </div>
+                <div id="recvStatus">دوربین را روشن کنید، قفل کنید، بعد ضبط کنید.</div>
+                <div class="progress-bar"><div id="progressFill" class="progress-fill"></div></div>
+                <div class="stats">
+                    <span>بسته‌ها: <b id="pktCount">0</b></span>
+                    <span>بلوک: <b id="blockCount">0 / —</b></span>
                 </div>
             </div>
-
-            <div class="chunks-list">
-                <h3>Detected Chunks</h3>
-                <div id="chunksList" class="chunks-container"></div>
+            <div id="resultBox" class="result" hidden>
+                <h3>فایل آماده است</h3>
+                <p id="fileInfo"></p>
+                <button id="downloadBtn" class="btn btn-success">دانلود</button>
             </div>
-        </div>
+        </section>
+    </div>
 
-        <div class="result-section" id="resultSection" style="display: none;">
-            <h3>File Reconstructed!</h3>
-            <div id="fileInfo" class="file-info"></div>
-            <button id="downloadBtn" class="btn btn-success">Download File</button>
-        </div>
+    <div id="playOverlay" class="play-overlay" hidden>
+        <canvas id="qrCanvas"></canvas>
+        <div id="playHud" class="play-hud"></div>
+        <button id="exitPlay" class="exit-play">بستن</button>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-    <script src="scanner.js"></script>
-    
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+    <script src="js/protocol.js"></script>
+    <script src="js/app.js"></script>
     <script>
-        // Register service worker
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('service-worker.js')
-                    .then(reg => console.log('Service Worker registered'))
-                    .catch(err => console.log('Service Worker registration failed'));
+                navigator.serviceWorker.register('service-worker.js').catch(() => {});
             });
         }
     </script>
 </body>
 </html>
-
