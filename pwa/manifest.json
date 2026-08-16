@@ -1,11 +1,11 @@
 {
-  "name": "QR Transfer Scanner",
-  "short_name": "QR Scanner",
-  "description": "Scan QR codes with green borders to transfer files",
+  "name": "Qxfer",
+  "short_name": "Qxfer",
+  "description": "Transfer files with animated QR codes",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#00ff00",
+  "background_color": "#121212",
+  "theme_color": "#00e676",
   "orientation": "portrait",
   "icons": [
     {
@@ -20,9 +20,5 @@
       "type": "image/png",
       "purpose": "any maskable"
     }
-  ],
-  "permissions": [
-    "camera"
   ]
 }
-

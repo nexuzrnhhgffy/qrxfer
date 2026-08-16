@@ -1,26 +1,6 @@
-import sys
-import logging
-from qrxfer.generator import QRVideoGenerator
+"""CLI entry: python main.py send FILE  |  python main.py receive VIDEO"""
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
-
-
-def main():
-    if len(sys.argv) < 2:
-        logger.error("Usage: python main.py <input_file> [output_video]")
-        sys.exit(1)
-    
-    input_file = sys.argv[1]
-    output_video = sys.argv[2] if len(sys.argv) > 2 else "compressed_qr_video.mp4"
-    
-    generator = QRVideoGenerator(qr_version=40, qr_size=400, fps=25)
-    generator.generate(input_file, output_video)
-    
-    logger.info("Done!")
-
+from qrxfer.__main__ import main
 
 if __name__ == "__main__":
-    main()
-
-
+    raise SystemExit(main())
