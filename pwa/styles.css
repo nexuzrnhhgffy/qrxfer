@@ -9,16 +9,20 @@ html, body {
 
 .home {
     min-height: 100dvh;
+    max-width: 26rem;
+    margin-inline: auto;
     display: flex;
     flex-direction: column;
     justify-content: center;
     gap: 16px;
     padding: 28px 20px;
+    padding-top: calc(28px + env(safe-area-inset-top));
+    padding-bottom: calc(28px + env(safe-area-inset-bottom));
 }
 
 .home h1 {
     text-align: center;
-    font-size: 2.4rem;
+    font-size: clamp(1.8rem, 6vw, 2.4rem);
     letter-spacing: 0.08em;
 }
 
@@ -44,8 +48,8 @@ html, body {
 .mega {
     border: 0;
     border-radius: 28px;
-    min-height: 26dvh;
-    font-size: 2rem;
+    min-height: clamp(7.25rem, 22dvh, 10rem);
+    font-size: clamp(1.4rem, 5vw, 2rem);
     font-weight: 800;
     cursor: pointer;
 }
@@ -58,27 +62,41 @@ html, body {
     position: fixed;
     inset: 0;
     background: #000;
-    display: grid;
-    grid-template-rows: 1fr 1fr;
-}
-
-.stage.full {
-    grid-template-rows: 1fr;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
 
 .stage.full #cam { display: none; }
 .stage.scan #qrCanvas { display: none; }
-.stage.split { grid-template-rows: 1fr 1fr; }
-.stage.scan { grid-template-rows: 1fr; }
+.stage.split { flex-direction: column; }
+.stage.split #cam,
+.stage.split #qrCanvas { flex: 1 1 50%; min-height: 0; }
 
-#cam, #qrCanvas {
+#cam {
+    position: absolute;
+    inset: 0;
     width: 100%;
     height: 100%;
-    object-fit: contain;
+    object-fit: cover;
     background: #000;
 }
 
-#cam { object-fit: cover; }
+.stage.split #cam {
+    position: relative;
+    inset: auto;
+}
+
+#qrCanvas {
+    display: block;
+    width: auto;
+    height: auto;
+    max-width: min(92vw, 72dvh);
+    max-height: min(92vw, 72dvh);
+    aspect-ratio: 1 / 1;
+    background: #000;
+}
 
 .guide {
     position: absolute;
@@ -93,7 +111,7 @@ html, body {
     position: absolute;
     left: 12px;
     right: 12px;
-    bottom: 18px;
+    bottom: calc(18px + env(safe-area-inset-bottom));
     text-align: center;
     background: rgba(0,0,0,0.62);
     padding: 10px 14px;
@@ -103,8 +121,8 @@ html, body {
 
 .close, .download {
     position: absolute;
-    top: 14px;
-    left: 14px;
+    top: calc(14px + env(safe-area-inset-top));
+    left: calc(14px + env(safe-area-inset-left));
     border: 0;
     border-radius: 999px;
     padding: 8px 14px;
@@ -117,7 +135,7 @@ html, body {
 
 .download {
     left: auto;
-    right: 14px;
+    right: calc(14px + env(safe-area-inset-right));
     background: #00e676;
     color: #06210f;
 }

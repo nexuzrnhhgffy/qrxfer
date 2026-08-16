@@ -54,3 +54,13 @@ class FlaskServeTests(unittest.TestCase):
         recv_fn = js[recv_start:]
         self.assertIn("startCamera", recv_fn)
         self.assertIn("MAX_FILE_BYTES", js)
+
+    def test_beacon_stays_square_and_not_stretched(self):
+        status, _, css = self._get("/styles.css")
+        self.assertEqual(status, 200)
+        self.assertIn("aspect-ratio: 1 / 1", css)
+        self.assertNotIn("#cam, #qrCanvas {\n    width: 100%;\n    height: 100%;", css)
+        status, _, js = self._get("/js/codec.js")
+        self.assertEqual(status, 200)
+        self.assertIn("function displaySize", js)
+        self.assertIn("540", js)

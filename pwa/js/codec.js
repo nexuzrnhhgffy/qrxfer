@@ -266,9 +266,26 @@
     return null;
   }
 
+  function displaySize(viewW, viewH, split) {
+    viewW = Math.max(0, viewW || 0);
+    viewH = Math.max(0, viewH || 0);
+    const marginX = Math.max(24, Math.round(viewW * 0.04));
+    const marginY = Math.max(88, Math.round(viewH * 0.1));
+    const availW = Math.max(160, viewW - marginX * 2);
+    const availH = Math.max(160, (split ? viewH * 0.48 : viewH) - marginY);
+    const box = Math.min(availW, availH);
+    const desktop = Math.min(viewW, viewH) >= 700;
+    const target = desktop
+      ? Math.min(Math.round(box * 0.68), 540)
+      : Math.round(box * 0.9);
+    return Math.max(180, Math.min(target, box));
+  }
+
   function canvasSize(split) {
-    const h = split ? window.innerHeight / 2 : window.innerHeight;
-    return Math.max(180, Math.min(window.innerWidth, h) - 8);
+    const vv = typeof window !== "undefined" && window.visualViewport;
+    const w = (vv && vv.width) || (typeof window !== "undefined" ? window.innerWidth : 390);
+    const h = (vv && vv.height) || (typeof window !== "undefined" ? window.innerHeight : 844);
+    return displaySize(w, h, split);
   }
 
   root.Beacon = {
@@ -283,6 +300,7 @@
     decodeGrid: decodeGrid,
     decodeImageData: decodeImageData,
     drawGrid: drawGrid,
+    displaySize: displaySize,
     canvasSize: canvasSize,
     wrapPayload: wrapPayload,
     unwrapPayload: unwrapPayload,

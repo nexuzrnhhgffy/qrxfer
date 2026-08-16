@@ -59,6 +59,7 @@ function homeError(text) {
 
 function showHome() {
   running = false;
+  lastPaint = null;
   stopCamera();
   stopPlay();
   $("stage").hidden = true;
@@ -136,20 +137,28 @@ function fail(err) {
   homeError(msg);
 }
 
+let lastPaint = null;
+let resizeTick = 0;
+
 function fitCanvas(split) {
   const canvas = $("qrCanvas");
-  const size = Beacon.canvasSize(split);
-  canvas.width = size;
-  canvas.height = size;
+  const css = Beacon.canvasSize(!!split);
+  const dpr = Math.max(1, Math.min(2.5, window.devicePixelRatio || 1));
+  canvas.style.width = css + "px";
+  canvas.style.height = css + "px";
+  canvas.width = Math.round(css * dpr);
+  canvas.height = Math.round(css * dpr);
   return canvas;
 }
 
 function drawControl(text, gridN) {
+  lastPaint = function () { drawControl(text, gridN); };
   const canvas = fitCanvas($("stage").classList.contains("split"));
   Beacon.drawGrid(canvas, Beacon.encodeControl(text, gridN || Beacon.HANDSHAKE_GRID));
 }
 
 function drawData(packet, gridN) {
+  lastPaint = function () { drawData(packet, gridN); };
   const canvas = fitCanvas(false);
   Beacon.drawGrid(canvas, Beacon.encodeData(packet, gridN));
 }
@@ -307,6 +316,7 @@ function scanUntil(predicate, timeoutMs, opts) {
 }
 
 function drawSolid(text) {
+  lastPaint = function () { drawSolid(text); };
   const canvas = fitCanvas(false);
   const ctx = canvas.getContext("2d");
   const size = canvas.width;
@@ -317,6 +327,18 @@ function drawSolid(text) {
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText(text, size / 2, size / 2);
+}
+
+function onViewportChange() {
+  if (!running || $("stage").hidden) return;
+  if ($("qrCanvas").style.display === "none") return;
+  if (typeof lastPaint === "function") lastPaint();
+}
+
+window.addEventListener("resize", onViewportChange);
+window.addEventListener("orientationchange", onViewportChange);
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", onViewportChange);
 }
 
 function sleep(ms) {

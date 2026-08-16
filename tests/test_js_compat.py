@@ -47,3 +47,28 @@ console.log(JSON.stringify({neigh, pkt, mixes, crc: Q.crc32(payload), agreed, bi
         self.assertEqual(js["bigK"], 70000)
         self.assertEqual(js["big"], list(encode_packet(1, 2, 70000, 16, 50, payload)))
         self.assertEqual(js["maxFile"], 1024 * 1024 * 1024)
+
+
+class DisplaySizeTests(unittest.TestCase):
+    def test_fits_phone_and_desktop_without_filling_the_monitor(self):
+        codec = ROOT / "pwa" / "js" / "codec.js"
+        script = r"""
+const B = require(process.argv[1]);
+const phone = B.displaySize(390, 844, false);
+const desk = B.displaySize(1920, 1080, false);
+const land = B.displaySize(844, 390, false);
+console.log(JSON.stringify({phone, desk, land}));
+"""
+        proc = subprocess.run(
+            ["node", "-e", script, str(codec)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        sizes = json.loads(proc.stdout)
+        self.assertGreaterEqual(sizes["phone"], 180)
+        self.assertLess(sizes["phone"], 390)
+        self.assertLessEqual(sizes["desk"], 540)
+        self.assertLess(sizes["desk"], 700)
+        self.assertLessEqual(sizes["land"], 390)
+        self.assertGreaterEqual(sizes["land"], 180)
